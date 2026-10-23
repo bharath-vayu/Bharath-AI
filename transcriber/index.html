@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Transcriber</title>
 <link rel="icon" href="icon.svg" type="image/svg+xml">
+<script src="coi-serviceworker.min.js"></script>
 <style>
   :root {
     --bg: #f5f3ef; --card: #ffffff; --line: #e3dfd8; --text: #1d1c1a; --muted: #8a857d; --live: #a09c96;
@@ -144,8 +145,9 @@
   <div class="row"><button id="dlgDriveCancel">Cancel</button></div>
 </dialog>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/vosk-browser@0.0.8/dist/vosk.js" crossorigin="anonymous"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.js" crossorigin="anonymous"></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="app.js"></script>
 </body>
