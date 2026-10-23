@@ -154,7 +154,7 @@
           else if (m.type === 'result') {
             const j = jobs.get(m.id); jobs.delete(m.id); S.pendingOthers = Math.max(0, S.pendingOthers - 1);
             const text = (m.text || '').trim().replace(/\s+/g, ' ');
-            if (j && text && !/^[\[\(\*].*[\]\)\*]$/.test(text) && /[a-z0-9]/i.test(text)) { j.seg.text = text; j.seg.refined = true; if (j.seg.node) refreshNode(j.seg.node); autosave(); }
+            if (j && text && !/^[\[\(\*].*[\]\)\*]$/.test(text) && /[a-z0-9]/i.test(text)) { j.seg.pending = text; if (S.segs[S.segs.length - 1] !== j.seg) applyPending(); }
           }
         };
         worker.onerror = e => { setStatus('Speech worker error: ' + (e.message || e)); worker._res?.(false); };
@@ -168,8 +168,13 @@
     const id = ++jobSeq; jobs.set(id, { seg }); S.pendingOthers++;
     worker.postMessage({ type: 'transcribe', id, audio: normalize(audio) }, [audio.buffer]);
   }
+  function applyPending() {   // whisper's cleaner text is only swapped in for rows that are no longer the newest one
+    const last = S.segs[S.segs.length - 1]; let changed = false;
+    for (const sg of S.segs) if (sg.pending && (sg !== last || !S.running)) { sg.text = sg.pending; sg.refined = true; delete sg.pending; if (sg.node) refreshNode(sg.node); changed = true; }
+    if (changed) autosave();
+  }
   function final(who, text, t0, t1) {
-    const s = { who, text, t0, t1 }; S.segs.push(s);
+    const s = { who, text, t0, t1 }; S.segs.push(s); applyPending();
     addEntry({ kind: 'text', who, text, t: t0 }, who === S.lastWho && t0 - S.lastT1 < 15, s); S.lastWho = who; S.lastT1 = t1; autosave();
     return s;
   }
@@ -270,7 +275,11 @@
     if (chk) chk.tNow = now();
     if (haveVosk) {
       rec = new voskModel.KaldiRecognizer(SR); rec.setWords(false); voskRecs.push(rec);
-      rec.on('partialresult', m => { const p = (m.result.partial || '').trim(); if (p && !pendN) segStart = now(); if (p !== partialTxt) { partialTxt = p; updateLive(); } });
+      rec.on('partialresult', m => {
+        const p = (m.result.partial || '').trim(); if (p && !pendN) segStart = now();
+        if (p && !partialTxt && asm && now() - asm.t1 >= 1.0) emit();   // speech resumed after a real pause: previous statement is done
+        if (p !== partialTxt) { partialTxt = p; updateLive(); }
+      });
       let asm = null, asmTimer = null, partialTxt = '';
       const updateLive = () => { const held = [...embJobs.values()].filter(j => j.label === label).map(j => j.text); S.live[label] = [...held, asm ? asm.text : '', partialTxt].filter(Boolean).join(' '); renderLive(); };
       liveUpdaters[label] = updateLive;
@@ -285,9 +294,9 @@
         const t = (m.result.text || '').trim(); const n = pendN; const bufs = pend; pend = []; pendN = 0; partialTxt = '';
         if (!t) { emit(); updateLive(); return; }
         const t1 = now(), t0 = Math.max(segStart, t1 - n / SR); segStart = t1;
-        if (asm && asm.n + n <= SR * 12) { asm.text += ' ' + t; asm.bufs.push(...bufs); asm.n += n; asm.t1 = t1; }
+        if (asm && asm.n + n <= SR * 15) { asm.text += ' ' + t; asm.bufs.push(...bufs); asm.n += n; asm.t1 = t1; }
         else { emit(); asm = { text: t, bufs, n, t0, t1 }; }
-        updateLive(); clearTimeout(asmTimer); asmTimer = setTimeout(emit, 900);
+        updateLive(); clearTimeout(asmTimer); asmTimer = setTimeout(emit, 2000);
       });
       ac._emit = emit;
     }
@@ -388,7 +397,7 @@
     S.running = false; clearInterval(clockTimer); setStatus('Finishing the last sentences…'); btnStart.disabled = true;
     cleanupMedia(); try { S.wake?.release(); } catch (e) {}
     const until = Date.now() + 10000; while ((S.pendingOthers > 0 || embJobs.size) && Date.now() < until) await new Promise(r => setTimeout(r, 150));
-    S.live = { Me: '', Others: '' }; renderLive();
+    applyPending(); S.live = { Me: '', Others: '' }; renderLive();
     btnStart.textContent = 'Start'; btnStart.className = 'primary'; btnStart.disabled = false;
     pill.classList.remove('rec'); pillText.textContent = 'Idle';
     setOn(swInclude, S.shots.length > 0); exportbar.classList.add('show'); rebuildView();
