@@ -12,7 +12,7 @@
   const SR = 16000;
 
   const S = { running: false, started: null, t0: 0, segs: [], shots: [], live: { Me: '', Others: '' }, lastWho: '', lastT1: -100, pendingOthers: 0 };
-  let display = null, mic = null, rec = null, ac = null, worker = null, workerReady = false, shotTimer = null, clockTimer = null, video = null, lastShotHash = 0, jobs = new Map(), jobSeq = 0;
+  let display = null, mic = null, worker = null, workerReady = false, shotTimer = null, clockTimer = null, video = null, lastShotHash = 0, jobs = new Map(), jobSeq = 0;
 
   const now = () => (performance.now() - S.t0) / 1000;
   const pad = n => String(n).padStart(2, '0');
@@ -121,9 +121,12 @@
         try { worker = new Worker('stt-worker.js', { type: 'module' }); } catch (e) { return resolve(false); }
         worker.onmessage = ev => {
           const m = ev.data;
-          if (m.type === 'progress') { if (m.p && m.p.status === 'progress' && m.p.file && m.p.file.endsWith('.onnx')) setStatus(`Downloading speech model (first time only): ${Math.round(m.p.progress || 0)}%`); }
+          if (m.type === 'progress' && !m.spk) { if (m.p && m.p.status === 'progress' && m.p.file && m.p.file.endsWith('.onnx')) setStatus(`Downloading speech model (first time only): ${Math.round(m.p.progress || 0)}%`); }
           else if (m.type === 'ready') { workerReady = true; setStatus(S.running ? 'Recording.' : 'Speech model ready.'); worker._res?.(true); }
           else if (m.type === 'error') { setStatus('Speech model failed to load: ' + m.error); worker._res?.(false); }
+          else if (m.type === 'embed-ready') { spkReady = !m.error; setStatus(m.error ? 'Speaker labels unavailable: ' + m.error : 'Recording.'); worker._spkRes?.(spkReady); }
+          else if (m.type === 'embedding') onEmbedding(m);
+          else if (m.type === 'progress' && m.spk) { if (m.p && m.p.status === 'progress' && m.p.file && m.p.file.endsWith('.onnx')) setStatus(`Loading speaker model (first time only): ${Math.round(m.p.progress || 0)}%`); }
           else if (m.type === 'result') {
             const j = jobs.get(m.id); jobs.delete(m.id); S.pendingOthers = Math.max(0, S.pendingOthers - 1);
             const text = (m.text || '').trim().replace(/\s+/g, ' ');
@@ -147,59 +150,65 @@
     return s;
   }
 
-  // ---------------------------------------------------------------- mic via Web Speech
-  function startMic() {
-    const Rec = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!Rec) { addEntry({ kind: 'err', who: 'Error', text: 'This browser has no speech recognition for the microphone. Use Chrome or Edge.', t: now() }, false); return; }
-    rec = new Rec(); rec.continuous = true; rec.interimResults = true; rec.lang = 'en-US'; let segStart = 0;
-    rec.onresult = ev => {
-      let interim = '';
-      for (let i = ev.resultIndex; i < ev.results.length; i++) {
-        const r = ev.results[i], t = r[0].transcript.trim(); if (!t) continue;
-        if (r.isFinal) { const t1 = now(); final('Me', t, segStart || t1 - 2, t1); segStart = 0; }
-        else { if (!segStart) segStart = now(); interim += t + ' '; }
-      }
-      S.live.Me = interim.trim(); renderLive();
-    };
-    rec.onerror = ev => { if (ev.error === 'not-allowed') addEntry({ kind: 'err', who: 'Error', text: 'Microphone blocked. Allow it in the address bar and press Start again.', t: now() }, false); };
-    rec.onend = () => { S.live.Me = ''; renderLive(); if (S.running && on(swMic)) { try { rec.start(); } catch (e) { setTimeout(() => S.running && rec.start(), 300); } } };
-    rec.start();
-  }
-
-  // ---------------------------------------------------------------- shared screen: audio + screenshots
-  // Feeds one audio track into the chunker. Uses the context's native rate and resamples to 16 kHz in JS,
-  // because a 16 kHz AudioContext fed by a 48 kHz capture track is unreliable across Chrome versions.
-  let meterTimer = null, meterLevel = 0;
-  let voskModel = null, voskRec = null;
+  // ---------------------------------------------------------------- speech pipeline (shared by mic and screen audio)
+  // Vosk prints words as they are spoken and decides where a sentence ends. Each finished sentence then gets
+  // (a) a speaker label from a voice embedding (screen audio only) and (b) a cleaner rewrite from whisper.
+  let meterTimer = null; const meter = { Others: 0, Me: 0 }, frames = { Others: 0, Me: 0 }; const contexts = [];
+  let voskModel = null; const voskRecs = [];
   const VOSK_MODEL = 'https://ccoreilly.github.io/vosk-browser/models/vosk-model-small-en-us-0.15.tar.gz';
   async function ensureVosk() {
     if (voskModel) return true;
     if (!window.Vosk) return false;
-    try { setStatus('Loading live speech model (first time only, ~40 MB)\u2026'); voskModel = await Vosk.createModel(VOSK_MODEL, 0); return true; }
+    try { setStatus('Loading live speech model (first time only, ~40 MB)…'); voskModel = await Vosk.createModel(VOSK_MODEL, 0); return true; }
     catch (e) { setStatus('Live speech model failed: ' + (e.message || e)); return false; }
   }
-  async function attachAudio(track) {
-    ac = new AudioContext();
+  // speaker labels
+  let spkReady = false, spkTried = false; const spk = []; const embJobs = new Map(); let embSeq = 0;
+  function ensureSpeaker() {
+    return new Promise(resolve => {
+      if (spkReady) return resolve(true); if (spkTried || !worker) return resolve(false); spkTried = true;
+      setStatus('Loading speaker model (first time only, ~100 MB)…');
+      worker._spkRes = resolve; worker.postMessage({ type: 'load-embed' });
+    });
+  }
+  const cosine = (x, y) => { let d = 0, nx = 0, ny = 0; for (let i = 0; i < x.length; i++) { d += x[i] * y[i]; nx += x[i] * x[i]; ny += y[i] * y[i]; } return nx && ny ? d / Math.sqrt(nx * ny) : 0; };
+  function assignSpeaker(emb, seconds) {
+    let best = -1, bestSim = -1;
+    spk.forEach((k, i) => { const c = cosine(emb, k.c); if (c > bestSim) { bestSim = c; best = i; } });
+    const longEnough = seconds >= 1.5;
+    if (best >= 0 && (bestSim >= 0.72 || !longEnough || (bestSim >= 0.6 && spk[best].n < 3) || spk.length >= 8)) {
+      const k = spk[best], w = 1 / (k.n + 1); for (let i = 0; i < emb.length; i++) k.c[i] = k.c[i] * (1 - w) + emb[i] * w; k.n = Math.min(20, k.n + 1); return best + 1;
+    }
+    spk.push({ c: emb.slice(), n: 1 }); return spk.length;
+  }
+  function onEmbedding(m) {
+    const j = embJobs.get(m.id); if (!j) return; embJobs.delete(m.id);
+    const who = m.embedding ? 'Speaker ' + assignSpeaker(m.embedding, j.audio.length / SR) : 'Others';
+    refine(final(who, j.text, j.t0, j.t1), j.audio);
+  }
+  async function attachAudio(track, label) {
+    const ac = new AudioContext(); contexts.push(ac);
     try { await ac.resume(); } catch (e) {}
     const src = ac.createMediaStreamSource(new MediaStream([track])), proc = ac.createScriptProcessor(4096, 1, 1), mute = ac.createGain(); mute.gain.value = 0;
     const haveVosk = await ensureVosk();
-    // Vosk gives words as they are spoken and decides where sentences end; the audio of each finished sentence goes to whisper for a cleaner rewrite.
-    let pend = [], pendN = 0, segStart = now(), lastPartialAt = 0;
-    const chk = haveVosk ? null : new Chunker((audio, t0, t1) => { const s = final('Others', '\u2026', t0, t1); refine(s, audio); });
+    const useSpk = label === 'Others' && await ensureSpeaker();
+    let pend = [], pendN = 0, segStart = now(), rec = null;
+    const chk = haveVosk ? null : new Chunker((audio, t0, t1) => refine(final(label, '…', t0, t1), audio));
     if (chk) chk.tNow = now();
     if (haveVosk) {
-      voskRec = new voskModel.KaldiRecognizer(SR); voskRec.setWords(false);
-      voskRec.on('partialresult', m => { const p = (m.result.partial || '').trim(); if (p && !pendN) segStart = now(); if (p !== S.live.Others) { S.live.Others = p; renderLive(); } });
-      voskRec.on('result', m => {
+      rec = new voskModel.KaldiRecognizer(SR); rec.setWords(false); voskRecs.push(rec);
+      rec.on('partialresult', m => { const p = (m.result.partial || '').trim(); if (p && !pendN) segStart = now(); if (p !== S.live[label]) { S.live[label] = p; renderLive(); } });
+      rec.on('result', m => {
         const t = (m.result.text || '').trim(); const n = pendN; const audio = new Float32Array(n); let o = 0; for (const b of pend) { audio.set(b, o); o += b.length; } pend = []; pendN = 0;
-        S.live.Others = ''; renderLive();
+        S.live[label] = ''; renderLive();
         if (!t) return;
         const t1 = now(), t0 = Math.max(segStart, t1 - n / SR); segStart = t1;
-        refine(final('Others', t, t0, t1), audio);
+        if (useSpk && worker && n >= SR * 0.8) { const id = ++embSeq; embJobs.set(id, { text: t, t0, t1, audio }); worker.postMessage({ type: 'embed', id, audio: audio.slice() }); }
+        else refine(final(useSpk && spk.length ? 'Speaker ' + 1 : label, t, t0, t1), audio);
       });
     }
-    ac._chk = { flush: () => { if (chk) chk.flush(); else if (voskRec) try { voskRec.retrieveFinalResult(); } catch (e) {} } };
-    const ratio = ac.sampleRate / SR; let frac = 0, prev = 0, have = false, frames = 0;
+    ac._flush = () => { if (chk) chk.flush(); else if (rec) try { rec.retrieveFinalResult(); } catch (e) {} };
+    const ratio = ac.sampleRate / SR; let frac = 0, prev = 0, have = false;
     proc.onaudioprocess = e => {
       if (!S.running) return;
       const inp = e.inputBuffer.getChannelData(0), out = new Float32Array(Math.ceil(inp.length / ratio) + 2); let n = 0, peak = 0;
@@ -209,18 +218,22 @@
         while (frac < 1) { out[n++] = prev + (cur - prev) * frac; frac += ratio; }
         frac -= 1; prev = cur;
       }
-      meterLevel = Math.max(meterLevel * 0.8, peak); frames++;
+      meter[label] = Math.max(meter[label] * 0.8, peak); frames[label]++;
       if (!n) return;
       const pcm = out.slice(0, n);
       if (chk) chk.push(pcm);
-      else { pend.push(pcm); pendN += n; if (pendN > SR * 30) { pend.shift(); pendN = pend.reduce((a, b) => a + b.length, 0); } let g = 1, pk = 0; for (let i = 0; i < n; i++) pk = Math.max(pk, Math.abs(pcm[i])); if (pk > 0.01 && pk < 0.5) g = 0.5 / pk; const amp = g === 1 ? pcm : pcm.map(v => v * g); voskRec.acceptWaveformFloat(amp, SR); }
+      else { pend.push(pcm); pendN += n; if (pendN > SR * 30) { pend.shift(); pendN = pend.reduce((a, b) => a + b.length, 0); } let g = 1, pk = 0; for (let i = 0; i < n; i++) pk = Math.max(pk, Math.abs(pcm[i])); if (pk > 0.01 && pk < 0.5) g = 0.5 / pk; rec.acceptWaveformFloat(g === 1 ? pcm : pcm.map(v => v * g), SR); }
     };
     src.connect(proc); proc.connect(mute); mute.connect(ac.destination);
-    meterTimer = setInterval(() => {
+    if (!meterTimer) meterTimer = setInterval(() => {
       if (!S.running) return;
-      const bars = '▁▂▃▄▅▆▇█', lvl = Math.min(7, Math.round(Math.log10(1 + meterLevel * 9) * 7));
-      const st = ac.state === 'running' ? (frames ? 'Hearing the share ' + bars.repeat(0) + bars[lvl] + (meterLevel < 0.004 ? '  (silent: is anything playing?)' : '') : 'Waiting for audio from the share…') : 'Audio context ' + ac.state + ' (click anywhere on the page)';
-      if (!status.textContent.startsWith('Downloading') && !status.textContent.startsWith('Building')) setStatus(st + (S.pendingOthers ? '  ·  transcribing' : ''));
+      const bars = '▁▂▃▄▅▆▇█', lv = x => bars[Math.min(7, Math.round(Math.log10(1 + x * 9) * 7))];
+      const parts = [];
+      for (const c of contexts) if (c.state !== 'running') parts.push('audio paused (click the page)');
+      if (frames.Others) parts.push('share ' + lv(meter.Others) + (meter.Others < 0.004 ? ' silent' : ''));
+      if (frames.Me) parts.push('mic ' + lv(meter.Me) + (meter.Me < 0.004 ? ' silent' : ''));
+      if (S.pendingOthers) parts.push('polishing'); if (embJobs.size) parts.push('identifying speaker');
+      const st = status.textContent; if (!/^(Downloading|Loading|Building)/.test(st)) setStatus('Recording  ·  ' + parts.join('  ·  '));
     }, 500);
   }
   async function startDisplay(wantAudio, wantVideo) {
@@ -250,25 +263,26 @@
   async function start() {
     const wantSys = on(swSys), wantMic = on(swMic), wantShot = on(swShot);
     if (!wantSys && !wantMic) { setStatus('Turn on at least one audio source.'); return; }
-    S.running = true; S.started = new Date(); S.t0 = performance.now(); S.segs = []; S.shots = []; S.live = { Me: '', Others: '' }; S.lastWho = ''; S.lastT1 = -100; S.pendingOthers = 0; lastShotHash = 0;
+    S.running = true; S.started = new Date(); S.t0 = performance.now(); spk.length = 0; embJobs.clear(); S.segs = []; S.shots = []; S.live = { Me: '', Others: '' }; S.lastWho = ''; S.lastT1 = -100; S.pendingOthers = 0; lastShotHash = 0;
     tv.innerHTML = ''; liveBox = null; exportbar.classList.remove('show'); $('restoreBanner').classList.remove('show');
     btnStart.disabled = true; [swSys, swMic, swShot, intervalEl].forEach(x => x.disabled = true);
     try {
       if (wantSys || wantShot) await startDisplay(wantSys, wantShot);
-      if (wantMic) { mic = await navigator.mediaDevices.getUserMedia({ audio: true }); startMic(); }
+      if (wantMic) { mic = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } }); if (await ensureWorker()) await attachAudio(mic.getAudioTracks()[0], 'Me'); }
     } catch (e) {
       S.running = false; btnStart.disabled = false; [swSys, swMic, swShot, intervalEl].forEach(x => x.disabled = false);
       setStatus(e.name === 'NotAllowedError' ? 'Sharing was cancelled.' : 'Could not start: ' + e.message); cleanupMedia(); return;
     }
     btnStart.textContent = 'Stop'; btnStart.className = 'dark'; btnStart.disabled = false;
     pill.classList.add('rec'); pillText.textContent = 'Recording  0:00'; clockTimer = setInterval(() => pillText.textContent = 'Recording  ' + ms(now()), 1000);
-    if (!status.textContent.startsWith('Downloading') && !ac) setStatus('Recording.');
+    if (!/^(Downloading|Loading)/.test(status.textContent)) setStatus('Recording.');
     try { if ('wakeLock' in navigator) S.wake = await navigator.wakeLock.request('screen'); } catch (e) {}
   }
   function cleanupMedia() {
-    if (rec) { rec.onend = null; try { rec.stop(); } catch (e) {} rec = null; }
     if (meterTimer) { clearInterval(meterTimer); meterTimer = null; }
-    if (ac) { try { ac._chk?.flush(); ac.close(); } catch (e) {} ac = null; }
+    for (const c of contexts) { try { c._flush?.(); c.close(); } catch (e) {} } contexts.length = 0;
+    for (const r of voskRecs) { try { r.remove(); } catch (e) {} } voskRecs.length = 0;
+    meter.Others = meter.Me = 0; frames.Others = frames.Me = 0;
     if (shotTimer) { clearInterval(shotTimer); shotTimer = null; }
     if (video) { video.srcObject = null; video = null; }
     for (const s of [display, mic]) s?.getTracks().forEach(t => t.stop()); display = mic = null;
@@ -276,8 +290,7 @@
   async function stop() {
     S.running = false; clearInterval(clockTimer); setStatus('Finishing the last sentences…'); btnStart.disabled = true;
     cleanupMedia(); try { S.wake?.release(); } catch (e) {}
-    const until = Date.now() + 8000; while (S.pendingOthers > 0 && Date.now() < until) await new Promise(r => setTimeout(r, 150));
-    if (voskRec) { try { voskRec.remove(); } catch (e) {} voskRec = null; }
+    const until = Date.now() + 10000; while ((S.pendingOthers > 0 || embJobs.size) && Date.now() < until) await new Promise(r => setTimeout(r, 150));
     S.live = { Me: '', Others: '' }; renderLive();
     btnStart.textContent = 'Start'; btnStart.className = 'primary'; btnStart.disabled = false; [swSys, swMic, swShot, intervalEl].forEach(x => x.disabled = false);
     pill.classList.remove('rec'); pillText.textContent = 'Idle';
@@ -403,5 +416,5 @@
   window.addEventListener('beforeunload', e => { if (S.running) { e.preventDefault(); e.returnValue = ''; } });
 
   // test hook (used by the automated layout/export check, harmless otherwise)
-  window.__transcriber = { S, final, addEntry, build, rebuildView, exportbar, setOn, swInclude, attachAudio, ensureWorker, ensureVosk, finish: () => { exportbar.classList.add('show'); rebuildView(); } };
+  window.__transcriber = { S, final, addEntry, build, rebuildView, exportbar, setOn, swInclude, attachAudio, ensureWorker, ensureVosk, ensureSpeaker, spk, finish: () => { exportbar.classList.add('show'); rebuildView(); } };
 })();
