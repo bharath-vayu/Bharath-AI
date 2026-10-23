@@ -28,24 +28,26 @@ Every later change is just editing files in the repo; Pages redeploys automatica
 
 ## Transcriber (browser edition)
 
-- **Microphone (me)** goes through the same engines as the share and is labeled "Me". Wear headphones so the mic does not
-  also hear the remote participants.
-- **System audio (others)** comes from a screen share. On Start the browser asks what to share; tick **Share system
-  audio** (entire screen) or **Share tab audio** (a tab). Two engines run in the browser, both downloaded once and cached
-  (~40 MB each): Vosk prints words as they are spoken and finalizes each sentence, then whisper (transformers.js)
-  rewrites that sentence more accurately in the background. If the machine is too slow to keep up, the Vosk text stays.
-  A third model (WavLM speaker embeddings, ~100 MB once) labels remote voices Speaker 1, Speaker 2, ... per sentence.
-  A window share carries no audio on Windows; share the whole screen or the tab instead.
-- `coi-serviceworker.min.js` turns on cross-origin isolation so whisper can use several CPU threads. It reloads the page
-  once on the very first visit; that is expected.
-- **Screenshots** are taken from the same share every N seconds (default 60); frames identical to the previous one are skipped.
-- **Stop** shows the export bar: Text, HTML, PDF, Word, plus "Include screenshots". HTML embeds the images so it is a
-  single file. The transcript is also kept in the browser's local storage until you export or discard it, so a closed tab
-  is recoverable.
+Open the page, press **Start**, pick the screen or tab to share with **Share system audio** / **Share tab audio** ticked,
+allow the microphone. Press **Stop** to get the export bar (Text, HTML, PDF, Word, optional Save to Google Drive).
 
-Differences from the Windows app: the share prompt on every Start, a smaller whisper model (base.en) and ~180 MB of
-model downloads on first use (cached afterwards). Audio never leaves the machine
-at any point.
+How it works, all inside the browser, nothing uploaded:
+
+- **Vosk** prints words as they are spoken and decides where each sentence ends.
+- **whisper** (transformers.js) rewrites each finished sentence more accurately a few seconds later; if the machine
+  cannot keep up, the Vosk text simply stays.
+- **WavLM speaker embeddings** label remote voices Speaker 1, Speaker 2, ... per sentence. You are "Me".
+- **Screenshots** from the share every N seconds (default 60), identical frames skipped.
+- All three switches and the interval work while recording. Turning a source off pauses it; turning on a source that
+  was never started prompts for the share or the microphone.
+
+The three models (about 180 MB in total) download the first time the page is opened, with a progress readout in the
+status line, and are cached in the browser after that. Later visits take about 5 seconds to get ready, in the
+background. `coi-serviceworker.min.js` enables multi-threading for whisper; it reloads the page once on the very first
+visit, which is expected.
+
+Tips: wear headphones so the microphone hears only you. A window share carries no audio on Windows; share the whole
+screen or the tab. The Windows app in Releases does the same job fully offline with no share prompt.
 
 ## Save to Google Drive (optional, one time)
 

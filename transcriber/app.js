@@ -1,6 +1,6 @@
 /* Transcriber (browser edition)
-   Mic -> Web Speech API (instant live text, label "Me")
-   Shared screen/tab audio -> whisper (transformers.js, in a worker, label "Others")
+   Microphone and shared screen/tab audio -> Vosk (live words, sentence boundaries) -> whisper rewrite (transformers.js worker)
+   Shared audio sentences -> WavLM speaker embedding -> Speaker 1, Speaker 2, ...   Microphone -> "Me"
    Shared video -> screenshots every N seconds, unchanged frames skipped
    Export: Text / HTML / PDF / Word, optional Save to Google Drive                                    */
 (() => {
@@ -11,7 +11,7 @@
   const exportbar = $('exportbar');
   const SR = 16000;
 
-  const S = { running: false, started: null, t0: 0, segs: [], shots: [], live: { Me: '', Others: '' }, lastWho: '', lastT1: -100, pendingOthers: 0 };
+  const S = { running: false, active: { Others: true, Me: true }, started: null, t0: 0, segs: [], shots: [], live: { Me: '', Others: '' }, lastWho: '', lastT1: -100, pendingOthers: 0 };
   let display = null, mic = null, worker = null, workerReady = false, shotTimer = null, clockTimer = null, video = null, lastShotHash = 0, jobs = new Map(), jobSeq = 0;
 
   const now = () => (performance.now() - S.t0) / 1000;
@@ -24,7 +24,31 @@
   const esc = s => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const SPK = ['#2563eb', '#c2410c', '#7c3aed', '#0e7490', '#b91c1c', '#4d7c0f', '#a16207', '#be185d'];
   const whoColor = w => w === 'Me' ? '#16805c' : w.startsWith('Speaker ') ? SPK[(parseInt(w.slice(8)) - 1) % 8] : 'var(--muted)';
-  document.querySelectorAll('.switch').forEach(sw => sw.addEventListener('click', () => { if (!sw.disabled) { setOn(sw, !on(sw)); if (sw === swInclude) rebuildView(); } }));
+  document.querySelectorAll('.switch').forEach(sw => sw.addEventListener('click', () => { if (sw.disabled) return; setOn(sw, !on(sw)); if (sw === swInclude) rebuildView(); else if (S.running) liveToggle(sw).catch(e => setStatus('Could not change that: ' + e.message)); }));
+  // Switches work while recording: pausing a source keeps its stream and just stops feeding it; enabling a source
+  // that was never started acquires it (the browser will prompt for the share or the microphone).
+  async function liveToggle(sw) {
+    const want = on(sw);
+    if (sw === swShot) {
+      if (want && !display) { sw.disabled = true; try { await startDisplay(false, true); } finally { sw.disabled = false; } }
+      else if (want && !video) await attachVideo();
+      restartShotTimer(); if (want) setTimeout(snap, 300);
+    } else {
+      const label = sw === swSys ? 'Others' : 'Me';
+      const ctx = contexts.find(c => c._label === label);
+      if (!want) { S.active[label] = false; ctx?._pause(); return; }
+      if (ctx) { S.active[label] = true; return; }
+      sw.disabled = true;
+      try {
+        if (label === 'Me') { mic = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } }); S.active.Me = true; if (await ensureWorker()) await attachAudio(mic.getAudioTracks()[0], 'Me'); }
+        else {
+          const at = display?.getAudioTracks()[0];
+          if (at) { S.active.Others = true; if (await ensureWorker()) await attachAudio(at, 'Others'); }
+          else { const old = display; display = null; S.active.Others = true; await startDisplay(true, on(swShot)); old?.getTracks().forEach(t => t.stop()); }
+        }
+      } finally { sw.disabled = false; }
+    }
+  }
 
   // ---------------------------------------------------------------- transcript view
   function entryNode(e) {
@@ -122,9 +146,9 @@
         worker.onmessage = ev => {
           const m = ev.data;
           if (m.type === 'progress' && !m.spk) { if (m.p && m.p.status === 'progress' && m.p.file && m.p.file.endsWith('.onnx')) setStatus(`Downloading speech model (first time only): ${Math.round(m.p.progress || 0)}%`); }
-          else if (m.type === 'ready') { workerReady = true; setStatus(S.running ? 'Recording.' : 'Speech model ready.'); worker._res?.(true); }
+          else if (m.type === 'ready') { workerReady = true; if (S.running) setStatus('Recording.'); worker._res?.(true); }
           else if (m.type === 'error') { setStatus('Speech model failed to load: ' + m.error); worker._res?.(false); }
-          else if (m.type === 'embed-ready') { spkReady = !m.error; setStatus(m.error ? 'Speaker labels unavailable: ' + m.error : 'Recording.'); worker._spkRes?.(spkReady); }
+          else if (m.type === 'embed-ready') { spkReady = !m.error; if (m.error) setStatus('Speaker labels unavailable: ' + m.error); else if (S.running) setStatus('Recording.'); worker._spkRes?.(spkReady); }
           else if (m.type === 'embedding') onEmbedding(m);
           else if (m.type === 'progress' && m.spk) { if (m.p && m.p.status === 'progress' && m.p.file && m.p.file.endsWith('.onnx')) setStatus(`Loading speaker model (first time only): ${Math.round(m.p.progress || 0)}%`); }
           else if (m.type === 'result') {
@@ -154,13 +178,36 @@
   // Vosk prints words as they are spoken and decides where a sentence ends. Each finished sentence then gets
   // (a) a speaker label from a voice embedding (screen audio only) and (b) a cleaner rewrite from whisper.
   let meterTimer = null; const meter = { Others: 0, Me: 0 }, frames = { Others: 0, Me: 0 }; const contexts = [];
-  let voskModel = null; const voskRecs = [];
+  let voskModel = null, voskLoading = null; const voskRecs = [];
   const VOSK_MODEL = 'https://ccoreilly.github.io/vosk-browser/models/vosk-model-small-en-us-0.15.tar.gz';
-  async function ensureVosk() {
-    if (voskModel) return true;
-    if (!window.Vosk) return false;
-    try { setStatus('Loading live speech model (first time only, ~40 MB)…'); voskModel = await Vosk.createModel(VOSK_MODEL, 0); return true; }
-    catch (e) { setStatus('Live speech model failed: ' + (e.message || e)); return false; }
+  // Download with a progress readout, stored in the browser cache so the next visit is instant.
+  async function fetchCached(url, label) {
+    let cache = null; try { cache = await caches.open('transcriber-models'); } catch (e) {}
+    const hit = cache && await cache.match(url); if (hit) return await hit.blob();
+    const resp = await fetch(url, { mode: 'cors' }); if (!resp.ok) throw new Error(`${label}: HTTP ${resp.status}`);
+    const total = +resp.headers.get('content-length') || 0, reader = resp.body.getReader(), chunks = []; let got = 0, lastPct = -1;
+    for (;;) {
+      const { done, value } = await reader.read(); if (done) break; chunks.push(value); got += value.length;
+      const pct = total ? Math.round(got / total * 100) : -1;
+      if (pct !== lastPct) { lastPct = pct; setStatus(`${label} (first time only): ${total ? pct + '%' : (got / 1048576).toFixed(0) + ' MB'}`); }
+    }
+    const blob = new Blob(chunks);
+    if (cache) cache.put(url, new Response(blob, { headers: { 'Content-Type': resp.headers.get('content-type') || 'application/octet-stream' } })).catch(() => {});
+    return blob;
+  }
+  function ensureVosk() {
+    if (voskModel) return Promise.resolve(true);
+    if (!window.Vosk) return Promise.resolve(false);
+    if (!voskLoading) voskLoading = (async () => {
+      try {
+        const blob = await fetchCached(VOSK_MODEL, 'Downloading live speech model, 40 MB');
+        setStatus('Starting live speech model…');
+        const url = URL.createObjectURL(blob);
+        voskModel = await Promise.race([Vosk.createModel(url, 0), new Promise((_, rej) => setTimeout(() => rej(new Error('timed out')), 120000))]);
+        return true;
+      } catch (e) { setStatus('Live speech model failed: ' + (e.message || e) + '. Reload the page to retry.'); voskLoading = null; return false; }
+    })();
+    return voskLoading;
   }
   // speaker labels
   let spkReady = false, spkTried = false; const spk = []; const embJobs = new Map(); let embSeq = 0;
@@ -183,7 +230,8 @@
   }
   function onEmbedding(m) {
     const j = embJobs.get(m.id); if (!j) return; embJobs.delete(m.id);
-    const who = m.embedding ? 'Speaker ' + assignSpeaker(m.embedding, j.audio.length / SR) : 'Others';
+    const words = j.text.split(/\s+/).length;   // one- or two-word fragments never open a new speaker
+    const who = m.embedding ? 'Speaker ' + assignSpeaker(m.embedding, words >= 3 ? j.audio.length / SR : 0) : 'Others';
     refine(final(who, j.text, j.t0, j.t1), j.audio);
   }
   async function attachAudio(track, label) {
@@ -209,8 +257,9 @@
     }
     ac._flush = () => { if (chk) chk.flush(); else if (rec) try { rec.retrieveFinalResult(); } catch (e) {} };
     const ratio = ac.sampleRate / SR; let frac = 0, prev = 0, have = false;
+    ac._label = label; ac._pause = () => { ac._flush(); S.live[label] = ''; renderLive(); setTimeout(() => { pend = []; pendN = 0; }, 400); };
     proc.onaudioprocess = e => {
-      if (!S.running) return;
+      if (!S.running || !S.active[label]) return;
       const inp = e.inputBuffer.getChannelData(0), out = new Float32Array(Math.ceil(inp.length / ratio) + 2); let n = 0, peak = 0;
       for (let i = 0; i < inp.length; i++) {
         const cur = inp[i]; peak = Math.max(peak, Math.abs(cur));
@@ -230,34 +279,45 @@
       const bars = '▁▂▃▄▅▆▇█', lv = x => bars[Math.min(7, Math.round(Math.log10(1 + x * 9) * 7))];
       const parts = [];
       for (const c of contexts) if (c.state !== 'running') parts.push('audio paused (click the page)');
-      if (frames.Others) parts.push('share ' + lv(meter.Others) + (meter.Others < 0.004 ? ' silent' : ''));
-      if (frames.Me) parts.push('mic ' + lv(meter.Me) + (meter.Me < 0.004 ? ' silent' : ''));
+      if (frames.Others) parts.push(S.active.Others ? 'share ' + lv(meter.Others) + (meter.Others < 0.004 ? ' silent' : '') : 'share off');
+      if (frames.Me) parts.push(S.active.Me ? 'mic ' + lv(meter.Me) + (meter.Me < 0.004 ? ' silent' : '') : 'mic off');
+      parts.push(on(swShot) && video ? 'screenshots every ' + intervalEl.value + ' s' : 'screenshots off');
       if (S.pendingOthers) parts.push('polishing'); if (embJobs.size) parts.push('identifying speaker');
       const st = status.textContent; if (!/^(Downloading|Loading|Building)/.test(st)) setStatus('Recording  ·  ' + parts.join('  ·  '));
     }, 500);
   }
   async function startDisplay(wantAudio, wantVideo) {
     display = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: wantAudio ? { echoCancellation: false, noiseSuppression: false, autoGainControl: false } : false, systemAudio: 'include', selfBrowserSurface: 'exclude', preferCurrentTab: false });
-    display.getVideoTracks()[0].onended = () => { if (S.running) stop(); };
+    display.getVideoTracks()[0].onended = () => { if (S.running && !document.hidden) stop(); };
+    if (video) { video.srcObject = null; video = null; if (shotTimer) { clearInterval(shotTimer); shotTimer = null; } }
     if (wantAudio) {
       const at = display.getAudioTracks()[0];
       if (!at) addEntry({ kind: 'err', who: 'Error', text: 'The share has no audio. Stop, press Start again and tick "Share system audio" (entire screen) or "Share tab audio" (tab). Window shares carry no audio on Windows.', t: now() }, false);
-      else { setStatus('Loading speech model…'); const ok = await ensureWorker(); if (ok) await attachAudio(at); }
+      else { setStatus('Loading speech model…'); const ok = await ensureWorker(); if (ok) await attachAudio(at, 'Others'); }
     }
-    if (wantVideo) {
-      video = document.createElement('video'); video.muted = true; video.srcObject = new MediaStream(display.getVideoTracks()); await video.play();
-      const iv = Math.max(5, Math.min(3600, parseInt(intervalEl.value) || 60)) * 1000;
-      const snap = () => { if (!S.running || video.videoWidth === 0) return;
-        const c = document.createElement('canvas'), W = Math.min(1920, video.videoWidth), H = Math.round(video.videoHeight * W / video.videoWidth); c.width = W; c.height = H;
-        const g = c.getContext('2d'); g.drawImage(video, 0, 0, W, H);
-        const sm = document.createElement('canvas'); sm.width = 96; sm.height = 54; const sg = sm.getContext('2d'); sg.drawImage(c, 0, 0, 96, 54);
-        const px = sg.getImageData(0, 0, 96, 54).data; let h = 2166136261; for (let i = 0; i < px.length; i += 4) { h = Math.imul(h ^ (px[i] >> 3), 16777619); h = Math.imul(h ^ (px[i + 1] >> 3), 16777619); h = Math.imul(h ^ (px[i + 2] >> 3), 16777619); }
-        if (h === lastShotHash) return; lastShotHash = h;
-        const t = now(), file = `shot_${pad(S.shots.length + 1).padStart(4, '0')}_${hms(t).replace(/:/g, '-')}.jpg`, data = c.toDataURL('image/jpeg', 0.82);
-        S.shots.push({ t, file, data }); addEntry({ kind: 'shot', file, data, t }, false); S.lastWho = ''; autosave(); };
-      setTimeout(snap, 800); shotTimer = setInterval(snap, iv);
-    }
+    if (wantVideo) await attachVideo();
   }
+  async function attachVideo() {
+    if (!display || video) return;
+    video = document.createElement('video'); video.muted = true; video.srcObject = new MediaStream(display.getVideoTracks()); await video.play();
+    setTimeout(snap, 800); restartShotTimer();
+  }
+  function restartShotTimer() {
+    if (shotTimer) { clearInterval(shotTimer); shotTimer = null; }
+    if (!S.running || !video || !on(swShot)) return;
+    const iv = Math.max(5, Math.min(3600, parseInt(intervalEl.value) || 60)) * 1000; shotTimer = setInterval(snap, iv);
+  }
+  function snap() {
+    if (!S.running || !on(swShot) || !video || video.videoWidth === 0) return;
+    const c = document.createElement('canvas'), W = Math.min(1920, video.videoWidth), H = Math.round(video.videoHeight * W / video.videoWidth); c.width = W; c.height = H;
+    const g = c.getContext('2d'); g.drawImage(video, 0, 0, W, H);
+    const sm = document.createElement('canvas'); sm.width = 96; sm.height = 54; const sg = sm.getContext('2d'); sg.drawImage(c, 0, 0, 96, 54);
+    const px = sg.getImageData(0, 0, 96, 54).data; let h = 2166136261; for (let i = 0; i < px.length; i += 4) { h = Math.imul(h ^ (px[i] >> 3), 16777619); h = Math.imul(h ^ (px[i + 1] >> 3), 16777619); h = Math.imul(h ^ (px[i + 2] >> 3), 16777619); }
+    if (h === lastShotHash) return; lastShotHash = h;
+    const t = now(), file = `shot_${pad(S.shots.length + 1).padStart(4, '0')}_${hms(t).replace(/:/g, '-')}.jpg`, data = c.toDataURL('image/jpeg', 0.82);
+    S.shots.push({ t, file, data }); addEntry({ kind: 'shot', file, data, t }, false); S.lastWho = ''; autosave();
+  }
+  intervalEl.addEventListener('change', restartShotTimer);
 
   // ---------------------------------------------------------------- start / stop
   async function start() {
@@ -265,12 +325,12 @@
     if (!wantSys && !wantMic) { setStatus('Turn on at least one audio source.'); return; }
     S.running = true; S.started = new Date(); S.t0 = performance.now(); spk.length = 0; embJobs.clear(); S.segs = []; S.shots = []; S.live = { Me: '', Others: '' }; S.lastWho = ''; S.lastT1 = -100; S.pendingOthers = 0; lastShotHash = 0;
     tv.innerHTML = ''; liveBox = null; exportbar.classList.remove('show'); $('restoreBanner').classList.remove('show');
-    btnStart.disabled = true; [swSys, swMic, swShot, intervalEl].forEach(x => x.disabled = true);
+    S.active = { Others: wantSys, Me: wantMic }; btnStart.disabled = true;
     try {
       if (wantSys || wantShot) await startDisplay(wantSys, wantShot);
       if (wantMic) { mic = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } }); if (await ensureWorker()) await attachAudio(mic.getAudioTracks()[0], 'Me'); }
     } catch (e) {
-      S.running = false; btnStart.disabled = false; [swSys, swMic, swShot, intervalEl].forEach(x => x.disabled = false);
+      S.running = false; btnStart.disabled = false;
       setStatus(e.name === 'NotAllowedError' ? 'Sharing was cancelled.' : 'Could not start: ' + e.message); cleanupMedia(); return;
     }
     btnStart.textContent = 'Stop'; btnStart.className = 'dark'; btnStart.disabled = false;
@@ -292,7 +352,7 @@
     cleanupMedia(); try { S.wake?.release(); } catch (e) {}
     const until = Date.now() + 10000; while ((S.pendingOthers > 0 || embJobs.size) && Date.now() < until) await new Promise(r => setTimeout(r, 150));
     S.live = { Me: '', Others: '' }; renderLive();
-    btnStart.textContent = 'Start'; btnStart.className = 'primary'; btnStart.disabled = false; [swSys, swMic, swShot, intervalEl].forEach(x => x.disabled = false);
+    btnStart.textContent = 'Start'; btnStart.className = 'primary'; btnStart.disabled = false;
     pill.classList.remove('rec'); pillText.textContent = 'Idle';
     setOn(swInclude, S.shots.length > 0); exportbar.classList.add('show'); rebuildView();
     setStatus(`Stopped. ${S.segs.length} sentences, ${S.shots.length} screenshots. Save it with the buttons above; nothing is kept once this tab is closed and discarded.`);
@@ -413,6 +473,14 @@
       $('btnDiscard').onclick = () => { idb.del(); $('restoreBanner').classList.remove('show'); };
     }
   })();
+  // Warm up all three models as soon as the page opens, so Start is quick.
+  async function preload() {
+    if (S.running) return;
+    const ok = await ensureWorker(); if (!ok) return;
+    await ensureVosk(); if (!S.running) await ensureSpeaker();
+    if (!S.running && !/failed|unavailable/.test(status.textContent)) setStatus('Ready. Models are loaded.');
+  }
+  setTimeout(preload, 600);
   window.addEventListener('beforeunload', e => { if (S.running) { e.preventDefault(); e.returnValue = ''; } });
 
   // test hook (used by the automated layout/export check, harmless otherwise)
