@@ -232,8 +232,9 @@
     }
     spk.push({ c: emb.slice(), n: 1 }); return spk.length;
   }
+  const liveUpdaters = {};
   function onEmbedding(m) {
-    const j = embJobs.get(m.id); if (!j) return; embJobs.delete(m.id);
+    const j = embJobs.get(m.id); if (!j) return; embJobs.delete(m.id); liveUpdaters[j.label]?.();
     const words = j.text.split(/\s+/).length;   // one- or two-word fragments never open a new speaker
     const who = m.embedding ? 'Speaker ' + assignSpeaker(m.embedding, words >= 3 ? j.audio.length / SR : 0) : 'Others';
     refine(final(who, j.text, j.t0, j.t1), j.audio);
@@ -269,28 +270,30 @@
     if (chk) chk.tNow = now();
     if (haveVosk) {
       rec = new voskModel.KaldiRecognizer(SR); rec.setWords(false); voskRecs.push(rec);
-      rec.on('partialresult', m => { const p = (m.result.partial || '').trim(); if (p && !pendN) segStart = now(); if (p !== S.live[label]) { S.live[label] = p; renderLive(); } });
-      let asm = null, asmTimer = null;
+      rec.on('partialresult', m => { const p = (m.result.partial || '').trim(); if (p && !pendN) segStart = now(); if (p !== partialTxt) { partialTxt = p; updateLive(); } });
+      let asm = null, asmTimer = null, partialTxt = '';
+      const updateLive = () => { const held = [...embJobs.values()].filter(j => j.label === label).map(j => j.text); S.live[label] = [...held, asm ? asm.text : '', partialTxt].filter(Boolean).join(' '); renderLive(); };
+      liveUpdaters[label] = updateLive;
       const emit = () => { if (!asm) return; const a = asm; asm = null; clearTimeout(asmTimer); asmTimer = null;
         const audio = new Float32Array(a.n); let o = 0; for (const b of a.bufs) { audio.set(b, o); o += b.length; }
         const t = a.text, t0 = a.t0, t1 = a.t1, n = a.n;
-        if (label === 'Others' && spkReady && n >= SR * 0.8) { const id = ++embSeq; embJobs.set(id, { text: t, t0, t1, audio }); worker.postMessage({ type: 'embed', id, audio: audio.slice() }); }
+        if (label === 'Others' && spkReady && n >= SR * 0.8) { const id = ++embSeq; embJobs.set(id, { label, text: t, t0, t1, audio }); worker.postMessage({ type: 'embed', id, audio: audio.slice() }); }
         else refine(final(label === 'Others' && spk.length ? 'Speaker 1' : label, t, t0, t1), audio);
+        updateLive();
       };
       rec.on('result', m => {
-        const t = (m.result.text || '').trim(); const n = pendN; const bufs = pend; pend = []; pendN = 0;
-        S.live[label] = ''; renderLive();
-        if (!t) { emit(); return; }
+        const t = (m.result.text || '').trim(); const n = pendN; const bufs = pend; pend = []; pendN = 0; partialTxt = '';
+        if (!t) { emit(); updateLive(); return; }
         const t1 = now(), t0 = Math.max(segStart, t1 - n / SR); segStart = t1;
         if (asm && asm.n + n <= SR * 12) { asm.text += ' ' + t; asm.bufs.push(...bufs); asm.n += n; asm.t1 = t1; }
         else { emit(); asm = { text: t, bufs, n, t0, t1 }; }
-        clearTimeout(asmTimer); asmTimer = setTimeout(emit, 900);
+        updateLive(); clearTimeout(asmTimer); asmTimer = setTimeout(emit, 900);
       });
       ac._emit = emit;
     }
     ac._flush = () => { if (chk) chk.flush(); else if (rec) { try { rec.retrieveFinalResult(); } catch (e) {} setTimeout(() => ac._emit?.(), 250); } };
     const ratio = ac.sampleRate / SR; let frac = 0, prev = 0, have = false;
-    ac._label = label; ac._pause = () => { ac._flush(); S.live[label] = ''; renderLive(); setTimeout(() => { pend = []; pendN = 0; }, 400); };
+    ac._label = label; ac._pause = () => { ac._flush(); partialTxt = ''; updateLive(); setTimeout(() => { pend = []; pendN = 0; }, 400); };
     proc.onaudioprocess = e => {
       if (!S.running || !S.active[label]) return;
       const inp = e.inputBuffer.getChannelData(0), out = new Float32Array(Math.ceil(inp.length / ratio) + 2); let n = 0, peak = 0;
