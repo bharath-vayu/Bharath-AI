@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bharath AI</title>
+<link rel="icon" href="transcriber/icon.svg" type="image/svg+xml">
+<style>
+  :root { --bg: #f5f3ef; --card: #fff; --line: #e3dfd8; --text: #1d1c1a; --muted: #8a857d; --primary: #e5484d; --dark: #1d1c1a; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.55 "Segoe UI", Inter, system-ui, sans-serif; }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 56px 24px 80px; }
+  h1 { font-size: 34px; letter-spacing: -.02em; margin: 0 0 6px; }
+  .sub { color: var(--muted); margin: 0 0 40px; }
+  .app { display: grid; grid-template-columns: 56px 1fr; gap: 20px; background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 22px 24px; margin-bottom: 16px; }
+  .app img { width: 56px; height: 56px; }
+  .app h2 { margin: 2px 0 4px; font-size: 20px; }
+  .app p { margin: 0 0 14px; color: var(--muted); font-size: 15px; }
+  .app ul { margin: 0 0 16px; padding-left: 18px; color: var(--muted); font-size: 14px; }
+  .btns { display: flex; gap: 10px; flex-wrap: wrap; }
+  a.btn { display: inline-flex; align-items: center; height: 36px; padding: 0 18px; border-radius: 999px; border: 1px solid var(--line); text-decoration: none; color: var(--text); background: var(--card); font-size: 15px; }
+  a.btn:hover { background: #faf8f5; }
+  a.btn.primary { background: var(--primary); border-color: var(--primary); color: #fff; font-weight: 600; }
+  a.btn.primary:hover { background: #ee5a5f; }
+  .note { font-size: 13px; color: var(--muted); margin-top: 8px; }
+  footer { margin-top: 40px; color: var(--muted); font-size: 13px; }
+  footer a { color: inherit; }
+  @media (max-width: 560px) { .app { grid-template-columns: 1fr; } .app img { width: 44px; height: 44px; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Bharath AI</h1>
+  <p class="sub">Small utilities that run in your browser or on your Windows machine. No accounts, no installs.</p>
+
+  <section class="app">
+    <img src="transcriber/icon.svg" alt="">
+    <div>
+      <h2>Transcriber</h2>
+      <p>Live meeting transcription with timed screenshots. Hears the other participants through a screen share and you through the microphone, then exports Text, HTML, PDF or Word, optionally straight to Google Drive.</p>
+      <ul>
+        <li><b>Browser:</b> Chrome or Edge. Nothing leaves your machine unless you save to Drive.</li>
+        <li><b>Windows app:</b> fully offline, labels remote voices Speaker 1 / Speaker 2, better accuracy. Unzip and run.</li>
+      </ul>
+      <div class="btns">
+        <a class="btn primary" href="transcriber/">Open in browser</a>
+        <a class="btn" href="https://github.com/bharath-vayu/Bharath-AI/releases/latest">Download for Windows</a>
+      </div>
+      <div class="note">Windows may show "Windows protected your PC" for the download because it is unsigned. More info, Run anyway.</div>
+    </div>
+  </section>
+
+  <footer>Source and issues on <a href="https://github.com/bharath-vayu/Bharath-AI">GitHub</a>.</footer>
+</div>
+</body>
+</html>
