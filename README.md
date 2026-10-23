@@ -27,16 +27,19 @@ Every later change is just editing files in the repo; Pages redeploys automatica
 
 - **Microphone (me)** uses the browser's speech recognition (Chrome/Edge). Words appear as you speak, labeled "Me".
 - **System audio (others)** comes from a screen share. On Start the browser asks what to share; tick **Share system
-  audio** (entire screen) or **Share tab audio** (a tab). Whisper runs inside the browser (transformers.js, ~40 MB model
-  downloaded once and cached) and transcribes each sentence after the speaker pauses, labeled "Others". A window share
-  carries no audio on Windows; share the whole screen or the tab instead.
+  audio** (entire screen) or **Share tab audio** (a tab). Two engines run in the browser, both downloaded once and cached
+  (~40 MB each): Vosk prints words as they are spoken and finalizes each sentence, then whisper (transformers.js)
+  rewrites that sentence more accurately in the background. If the machine is too slow to keep up, the Vosk text stays.
+  A window share carries no audio on Windows; share the whole screen or the tab instead.
+- `coi-serviceworker.min.js` turns on cross-origin isolation so whisper can use several CPU threads. It reloads the page
+  once on the very first visit; that is expected.
 - **Screenshots** are taken from the same share every N seconds (default 60); frames identical to the previous one are skipped.
 - **Stop** shows the export bar: Text, HTML, PDF, Word, plus "Include screenshots". HTML embeds the images so it is a
   single file. The transcript is also kept in the browser's local storage until you export or discard it, so a closed tab
   is recoverable.
 
-Differences from the Windows app: no Speaker 1 / Speaker 2 labels (only Me / Others), live text for "Others" appears
-after the sentence instead of word by word, and the whisper model is the smaller base.en. Audio never leaves the machine
+Differences from the Windows app: no Speaker 1 / Speaker 2 labels (only Me / Others) and the whisper model is the
+smaller base.en. Audio never leaves the machine
 except for the microphone, which Chrome/Edge send to Google/Microsoft for recognition.
 
 ## Save to Google Drive (optional, one time)
