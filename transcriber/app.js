@@ -164,22 +164,42 @@
   }
 
   // ---------------------------------------------------------------- shared screen: audio + screenshots
+  // Feeds one audio track into the chunker. Uses the context's native rate and resamples to 16 kHz in JS,
+  // because a 16 kHz AudioContext fed by a 48 kHz capture track is unreliable across Chrome versions.
+  let meterTimer = null, meterLevel = 0;
+  async function attachAudio(track) {
+    ac = new AudioContext();
+    try { await ac.resume(); } catch (e) {}
+    const src = ac.createMediaStreamSource(new MediaStream([track])), proc = ac.createScriptProcessor(4096, 1, 1), mute = ac.createGain(); mute.gain.value = 0;
+    const chk = new Chunker(transcribeOthers); chk.tNow = now(); ac._chk = chk;
+    const ratio = ac.sampleRate / SR; let frac = 0, prev = 0, have = false, frames = 0;
+    proc.onaudioprocess = e => {
+      if (!S.running) return;
+      const inp = e.inputBuffer.getChannelData(0), out = new Float32Array(Math.ceil(inp.length / ratio) + 2); let n = 0, peak = 0;
+      for (let i = 0; i < inp.length; i++) {
+        const cur = inp[i]; peak = Math.max(peak, Math.abs(cur));
+        if (!have) { prev = cur; have = true; continue; }
+        while (frac < 1) { out[n++] = prev + (cur - prev) * frac; frac += ratio; }
+        frac -= 1; prev = cur;
+      }
+      meterLevel = Math.max(meterLevel * 0.8, peak); frames++;
+      if (n) chk.push(out.subarray(0, n));
+    };
+    src.connect(proc); proc.connect(mute); mute.connect(ac.destination);
+    meterTimer = setInterval(() => {
+      if (!S.running) return;
+      const bars = '▁▂▃▄▅▆▇█', lvl = Math.min(7, Math.round(Math.log10(1 + meterLevel * 9) * 7));
+      const st = ac.state === 'running' ? (frames ? 'Hearing the share ' + bars.repeat(0) + bars[lvl] + (meterLevel < 0.004 ? '  (silent: is anything playing?)' : '') : 'Waiting for audio from the share…') : 'Audio context ' + ac.state + ' (click anywhere on the page)';
+      if (!status.textContent.startsWith('Downloading') && !status.textContent.startsWith('Building')) setStatus(st + (S.pendingOthers ? '  ·  transcribing' : ''));
+    }, 500);
+  }
   async function startDisplay(wantAudio, wantVideo) {
     display = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: wantAudio ? { echoCancellation: false, noiseSuppression: false, autoGainControl: false } : false, systemAudio: 'include', selfBrowserSurface: 'exclude', preferCurrentTab: false });
     display.getVideoTracks()[0].onended = () => { if (S.running) stop(); };
     if (wantAudio) {
       const at = display.getAudioTracks()[0];
       if (!at) addEntry({ kind: 'err', who: 'Error', text: 'The share has no audio. Stop, press Start again and tick "Share system audio" (entire screen) or "Share tab audio" (tab). Window shares carry no audio on Windows.', t: now() }, false);
-      else {
-        const ok = await ensureWorker();
-        if (ok) {
-          ac = new AudioContext({ sampleRate: SR });
-          const src = ac.createMediaStreamSource(new MediaStream([at])), proc = ac.createScriptProcessor(4096, 1, 1), mute = ac.createGain(); mute.gain.value = 0;
-          const chk = new Chunker(transcribeOthers); chk.tNow = now();
-          proc.onaudioprocess = e => { if (S.running) chk.push(e.inputBuffer.getChannelData(0)); };
-          src.connect(proc); proc.connect(mute); mute.connect(ac.destination); ac._chk = chk;
-        }
-      }
+      else { setStatus('Loading speech model…'); const ok = await ensureWorker(); if (ok) await attachAudio(at); }
     }
     if (wantVideo) {
       video = document.createElement('video'); video.muted = true; video.srcObject = new MediaStream(display.getVideoTracks()); await video.play();
@@ -212,11 +232,12 @@
     }
     btnStart.textContent = 'Stop'; btnStart.className = 'dark'; btnStart.disabled = false;
     pill.classList.add('rec'); pillText.textContent = 'Recording  0:00'; clockTimer = setInterval(() => pillText.textContent = 'Recording  ' + ms(now()), 1000);
-    if (!status.textContent.startsWith('Downloading')) setStatus('Recording. Grey text is provisional; it is replaced when the sentence is finished.');
+    if (!status.textContent.startsWith('Downloading') && !ac) setStatus('Recording.');
     try { if ('wakeLock' in navigator) S.wake = await navigator.wakeLock.request('screen'); } catch (e) {}
   }
   function cleanupMedia() {
     if (rec) { rec.onend = null; try { rec.stop(); } catch (e) {} rec = null; }
+    if (meterTimer) { clearInterval(meterTimer); meterTimer = null; }
     if (ac) { try { ac._chk?.flush(); ac.close(); } catch (e) {} ac = null; }
     if (shotTimer) { clearInterval(shotTimer); shotTimer = null; }
     if (video) { video.srcObject = null; video = null; }
@@ -351,5 +372,5 @@
   window.addEventListener('beforeunload', e => { if (S.running) { e.preventDefault(); e.returnValue = ''; } });
 
   // test hook (used by the automated layout/export check, harmless otherwise)
-  window.__transcriber = { S, final, addEntry, build, rebuildView, exportbar, setOn, swInclude, finish: () => { exportbar.classList.add('show'); rebuildView(); } };
+  window.__transcriber = { S, final, addEntry, build, rebuildView, exportbar, setOn, swInclude, attachAudio, ensureWorker, finish: () => { exportbar.classList.add('show'); rebuildView(); } };
 })();
