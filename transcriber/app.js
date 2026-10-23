@@ -35,13 +35,13 @@
       restartShotTimer(); if (want) setTimeout(snap, 300);
     } else {
       const label = sw === swSys ? 'Others' : 'Me';
+      if (label === 'Me') { S.active.Me = want; if (want && !rec) startMic(); if (!want) { S.live.Me = ''; renderLive(); } return; }
       const ctx = contexts.find(c => c._label === label);
       if (!want) { S.active[label] = false; ctx?._pause(); return; }
       if (ctx) { S.active[label] = true; return; }
       sw.disabled = true;
       try {
-        if (label === 'Me') { mic = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } }); S.active.Me = true; if (await ensureWorker()) await attachAudio(mic.getAudioTracks()[0], 'Me'); }
-        else {
+        {
           const at = display?.getAudioTracks()[0];
           if (at) { S.active.Others = true; if (await ensureWorker()) await attachAudio(at, 'Others'); }
           else { const old = display; display = null; S.active.Others = true; await startDisplay(true, on(swShot)); old?.getTracks().forEach(t => t.stop()); }
@@ -67,7 +67,7 @@
   let liveBox = null;
   function addEntry(e, merge, seg) {
     $('empty')?.remove();
-    const last = tv.querySelector('.e:not(.live):last-of-type');
+    const last = [...tv.children].reverse().find(el => el.classList.contains('e') && !el.classList.contains('live'));
     let node;
     if (merge && last && !last.classList.contains('shot') && last.dataset.who === e.who) { node = last; node._segs.push(seg || { text: e.text }); }
     else { node = entryNode(e); node.dataset.who = e.who || ''; node._segs = [seg || { text: e.text }]; if (liveBox) tv.insertBefore(node, liveBox); else tv.appendChild(node); }
@@ -148,9 +148,9 @@
           if (m.type === 'progress' && !m.spk) { if (m.p && m.p.status === 'progress' && m.p.file && m.p.file.endsWith('.onnx')) setStatus(`Downloading speech model (first time only): ${Math.round(m.p.progress || 0)}%`); }
           else if (m.type === 'ready') { workerReady = true; if (S.running) setStatus('Recording.'); worker._res?.(true); }
           else if (m.type === 'error') { setStatus('Speech model failed to load: ' + m.error); worker._res?.(false); }
-          else if (m.type === 'embed-ready') { spkReady = !m.error; if (m.error) setStatus('Speaker labels unavailable: ' + m.error); else if (S.running) setStatus('Recording.'); worker._spkRes?.(spkReady); }
+          else if (m.type === 'embed-ready') { spkReady = !m.error; setStatus(m.error ? 'Speaker labels unavailable: ' + m.error : S.running ? 'Recording.' : 'Ready. Models are loaded.'); worker._spkRes?.(spkReady); }
           else if (m.type === 'embedding') onEmbedding(m);
-          else if (m.type === 'progress' && m.spk) { if (m.p && m.p.status === 'progress' && m.p.file && m.p.file.endsWith('.onnx')) setStatus(`Loading speaker model (first time only): ${Math.round(m.p.progress || 0)}%`); }
+          else if (m.type === 'progress' && m.spk) { if (m.p && m.p.status === 'progress' && m.p.file && m.p.file.endsWith('.onnx')) setStatus(`Downloading speaker model (first time only): ${Math.round(m.p.progress || 0)}%`); else if (m.p && m.p.status === 'done' && m.p.file && m.p.file.endsWith('.onnx')) setStatus('Starting speaker model (20-40 s on a laptop)…'); }
           else if (m.type === 'result') {
             const j = jobs.get(m.id); jobs.delete(m.id); S.pendingOthers = Math.max(0, S.pendingOthers - 1);
             const text = (m.text || '').trim().replace(/\s+/g, ' ');
@@ -210,20 +210,24 @@
     return voskLoading;
   }
   // speaker labels
-  let spkReady = false, spkTried = false; const spk = []; const embJobs = new Map(); let embSeq = 0;
+  let spkReady = false, spkLoading = null; const spk = []; const embJobs = new Map(); let embSeq = 0;
   function ensureSpeaker() {
-    return new Promise(resolve => {
-      if (spkReady) return resolve(true); if (spkTried || !worker) return resolve(false); spkTried = true;
+    if (spkReady) return Promise.resolve(true);
+    if (!worker) return Promise.resolve(false);
+    if (!spkLoading) spkLoading = new Promise(resolve => {
       setStatus('Loading speaker model (first time only, ~100 MB)…');
-      worker._spkRes = resolve; worker.postMessage({ type: 'load-embed' });
+      const timer = setTimeout(() => { setStatus('Speaker labels unavailable: the speaker model took too long to start.'); resolve(false); }, 180000);
+      worker._spkRes = ok => { clearTimeout(timer); if (!ok) spkLoading = null; resolve(ok); };
+      worker.postMessage({ type: 'load-embed' });
     });
+    return spkLoading;
   }
   const cosine = (x, y) => { let d = 0, nx = 0, ny = 0; for (let i = 0; i < x.length; i++) { d += x[i] * y[i]; nx += x[i] * x[i]; ny += y[i] * y[i]; } return nx && ny ? d / Math.sqrt(nx * ny) : 0; };
   function assignSpeaker(emb, seconds) {
     let best = -1, bestSim = -1;
     spk.forEach((k, i) => { const c = cosine(emb, k.c); if (c > bestSim) { bestSim = c; best = i; } });
     const longEnough = seconds >= 1.5;
-    if (best >= 0 && (bestSim >= 0.72 || !longEnough || (bestSim >= 0.6 && spk[best].n < 3) || spk.length >= 8)) {
+    if (best >= 0 && (bestSim >= 0.65 || !longEnough || spk.length >= 8)) {
       const k = spk[best], w = 1 / (k.n + 1); for (let i = 0; i < emb.length; i++) k.c[i] = k.c[i] * (1 - w) + emb[i] * w; k.n = Math.min(20, k.n + 1); return best + 1;
     }
     spk.push({ c: emb.slice(), n: 1 }); return spk.length;
@@ -234,28 +238,57 @@
     const who = m.embedding ? 'Speaker ' + assignSpeaker(m.embedding, words >= 3 ? j.audio.length / SR : 0) : 'Others';
     refine(final(who, j.text, j.t0, j.t1), j.audio);
   }
+  let rec = null;
+  function startMic() {
+    const Rec = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!Rec) { addEntry({ kind: 'err', who: 'Error', text: 'This browser has no speech recognition for the microphone. Use Chrome or Edge.', t: now() }, false); return; }
+    rec = new Rec(); rec.continuous = true; rec.interimResults = true; rec.lang = 'en-US'; let segStart = 0;
+    rec.onresult = ev => {
+      if (!S.active.Me) return;
+      let interim = '';
+      for (let i = ev.resultIndex; i < ev.results.length; i++) {
+        const r = ev.results[i], t = r[0].transcript.trim(); if (!t) continue;
+        if (r.isFinal) { const t1 = now(); final('Me', t, segStart || t1 - 2, t1); segStart = 0; }
+        else { if (!segStart) segStart = now(); interim += t + ' '; }
+      }
+      S.live.Me = interim.trim(); renderLive();
+    };
+    rec.onerror = ev => { if (ev.error === 'not-allowed') addEntry({ kind: 'err', who: 'Error', text: 'Microphone blocked. Allow it in the address bar and press Start again.', t: now() }, false); };
+    rec.onend = () => { S.live.Me = ''; renderLive(); if (S.running && rec) { try { rec.start(); } catch (e) { setTimeout(() => { try { S.running && rec && rec.start(); } catch (e2) {} }, 300); } } };
+    rec.start(); frames.Me = 1;
+  }
+  function stopMic() { if (rec) { const r = rec; rec = null; r.onend = null; try { r.stop(); } catch (e) {} } S.live.Me = ''; renderLive(); }
   async function attachAudio(track, label) {
     const ac = new AudioContext(); contexts.push(ac);
     try { await ac.resume(); } catch (e) {}
     const src = ac.createMediaStreamSource(new MediaStream([track])), proc = ac.createScriptProcessor(4096, 1, 1), mute = ac.createGain(); mute.gain.value = 0;
     const haveVosk = await ensureVosk();
-    const useSpk = label === 'Others' && await ensureSpeaker();
+    if (label === 'Others') ensureSpeaker();   // runs in the background; sentences get labels once it is ready
     let pend = [], pendN = 0, segStart = now(), rec = null;
     const chk = haveVosk ? null : new Chunker((audio, t0, t1) => refine(final(label, '…', t0, t1), audio));
     if (chk) chk.tNow = now();
     if (haveVosk) {
       rec = new voskModel.KaldiRecognizer(SR); rec.setWords(false); voskRecs.push(rec);
       rec.on('partialresult', m => { const p = (m.result.partial || '').trim(); if (p && !pendN) segStart = now(); if (p !== S.live[label]) { S.live[label] = p; renderLive(); } });
+      let asm = null, asmTimer = null;
+      const emit = () => { if (!asm) return; const a = asm; asm = null; clearTimeout(asmTimer); asmTimer = null;
+        const audio = new Float32Array(a.n); let o = 0; for (const b of a.bufs) { audio.set(b, o); o += b.length; }
+        const t = a.text, t0 = a.t0, t1 = a.t1, n = a.n;
+        if (label === 'Others' && spkReady && n >= SR * 0.8) { const id = ++embSeq; embJobs.set(id, { text: t, t0, t1, audio }); worker.postMessage({ type: 'embed', id, audio: audio.slice() }); }
+        else refine(final(label === 'Others' && spk.length ? 'Speaker 1' : label, t, t0, t1), audio);
+      };
       rec.on('result', m => {
-        const t = (m.result.text || '').trim(); const n = pendN; const audio = new Float32Array(n); let o = 0; for (const b of pend) { audio.set(b, o); o += b.length; } pend = []; pendN = 0;
+        const t = (m.result.text || '').trim(); const n = pendN; const bufs = pend; pend = []; pendN = 0;
         S.live[label] = ''; renderLive();
-        if (!t) return;
+        if (!t) { emit(); return; }
         const t1 = now(), t0 = Math.max(segStart, t1 - n / SR); segStart = t1;
-        if (useSpk && worker && n >= SR * 0.8) { const id = ++embSeq; embJobs.set(id, { text: t, t0, t1, audio }); worker.postMessage({ type: 'embed', id, audio: audio.slice() }); }
-        else refine(final(useSpk && spk.length ? 'Speaker ' + 1 : label, t, t0, t1), audio);
+        if (asm && asm.n + n <= SR * 12) { asm.text += ' ' + t; asm.bufs.push(...bufs); asm.n += n; asm.t1 = t1; }
+        else { emit(); asm = { text: t, bufs, n, t0, t1 }; }
+        clearTimeout(asmTimer); asmTimer = setTimeout(emit, 900);
       });
+      ac._emit = emit;
     }
-    ac._flush = () => { if (chk) chk.flush(); else if (rec) try { rec.retrieveFinalResult(); } catch (e) {} };
+    ac._flush = () => { if (chk) chk.flush(); else if (rec) { try { rec.retrieveFinalResult(); } catch (e) {} setTimeout(() => ac._emit?.(), 250); } };
     const ratio = ac.sampleRate / SR; let frac = 0, prev = 0, have = false;
     ac._label = label; ac._pause = () => { ac._flush(); S.live[label] = ''; renderLive(); setTimeout(() => { pend = []; pendN = 0; }, 400); };
     proc.onaudioprocess = e => {
@@ -280,7 +313,7 @@
       const parts = [];
       for (const c of contexts) if (c.state !== 'running') parts.push('audio paused (click the page)');
       if (frames.Others) parts.push(S.active.Others ? 'share ' + lv(meter.Others) + (meter.Others < 0.004 ? ' silent' : '') : 'share off');
-      if (frames.Me) parts.push(S.active.Me ? 'mic ' + lv(meter.Me) + (meter.Me < 0.004 ? ' silent' : '') : 'mic off');
+      if (frames.Me) parts.push(S.active.Me && rec ? 'mic on' : 'mic off');
       parts.push(on(swShot) && video ? 'screenshots every ' + intervalEl.value + ' s' : 'screenshots off');
       if (S.pendingOthers) parts.push('polishing'); if (embJobs.size) parts.push('identifying speaker');
       const st = status.textContent; if (!/^(Downloading|Loading|Building)/.test(st)) setStatus('Recording  ·  ' + parts.join('  ·  '));
@@ -328,18 +361,19 @@
     S.active = { Others: wantSys, Me: wantMic }; btnStart.disabled = true;
     try {
       if (wantSys || wantShot) await startDisplay(wantSys, wantShot);
-      if (wantMic) { mic = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } }); if (await ensureWorker()) await attachAudio(mic.getAudioTracks()[0], 'Me'); }
+      if (wantMic) startMic();
     } catch (e) {
       S.running = false; btnStart.disabled = false;
       setStatus(e.name === 'NotAllowedError' ? 'Sharing was cancelled.' : 'Could not start: ' + e.message); cleanupMedia(); return;
     }
     btnStart.textContent = 'Stop'; btnStart.className = 'dark'; btnStart.disabled = false;
     pill.classList.add('rec'); pillText.textContent = 'Recording  0:00'; clockTimer = setInterval(() => pillText.textContent = 'Recording  ' + ms(now()), 1000);
-    if (!/^(Downloading|Loading)/.test(status.textContent)) setStatus('Recording.');
+    if (!/^(Downloading|Loading|Starting)/.test(status.textContent)) setStatus('Recording.');
     try { if ('wakeLock' in navigator) S.wake = await navigator.wakeLock.request('screen'); } catch (e) {}
   }
   function cleanupMedia() {
     if (meterTimer) { clearInterval(meterTimer); meterTimer = null; }
+    stopMic();
     for (const c of contexts) { try { c._flush?.(); c.close(); } catch (e) {} } contexts.length = 0;
     for (const r of voskRecs) { try { r.remove(); } catch (e) {} } voskRecs.length = 0;
     meter.Others = meter.Me = 0; frames.Others = frames.Me = 0;

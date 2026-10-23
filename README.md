@@ -33,15 +33,16 @@ allow the microphone. Press **Stop** to get the export bar (Text, HTML, PDF, Wor
 
 How it works, all inside the browser, nothing uploaded:
 
-- **Vosk** prints words as they are spoken and decides where each sentence ends.
-- **whisper** (transformers.js) rewrites each finished sentence more accurately a few seconds later; if the machine
-  cannot keep up, the Vosk text simply stays.
-- **WavLM speaker embeddings** label remote voices Speaker 1, Speaker 2, ... per sentence. You are "Me".
+- **Your microphone** uses the browser's own recognizer (Chrome/Edge): instant, phrase-aware, no download. Labeled "Me".
+- **The shared audio** goes through Vosk (live words, sentence boundaries), then whisper (transformers.js) rewrites each
+  finished sentence more accurately a few seconds later; if the machine cannot keep up, the Vosk text simply stays.
+- **WavLM speaker embeddings** label the remote voices Speaker 1, Speaker 2, ... per sentence. Until that model has
+  finished starting (20-40 s after the page opens), sentences are labeled "Others".
 - **Screenshots** from the share every N seconds (default 60), identical frames skipped.
 - All three switches and the interval work while recording. Turning a source off pauses it; turning on a source that
   was never started prompts for the share or the microphone.
 
-The three models (about 180 MB in total) download the first time the page is opened, with a progress readout in the
+The models (about 180 MB in total) download the first time the page is opened, with a progress readout in the
 status line, and are cached in the browser after that. Later visits take about 5 seconds to get ready, in the
 background. `coi-serviceworker.min.js` enables multi-threading for whisper; it reloads the page once on the very first
 visit, which is expected.
