@@ -3,55 +3,198 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Bharath AI</title>
-<link rel="icon" href="transcriber/icon.svg" type="image/svg+xml">
+<title>Transcriber</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#f5f3ef">
+<link rel="apple-touch-icon" href="icon-192.png">
+<script src="coi-serviceworker.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <style>
-  :root { --bg: #f5f3ef; --card: #fff; --line: #e3dfd8; --text: #1d1c1a; --muted: #8a857d; --primary: #e5484d; --dark: #1d1c1a; }
+  /* Layout: editorial two-column transcript on warm paper; serif display, sans body, mono timestamps. */
+  :root {
+    --paper: #f6f2ec; --paper-2: #efe9e1; --card: #fffdf9; --line: #e2dad0; --line-strong: #cfc5b8;
+    --ink: #1c1917; --ink-soft: #6f655d; --ink-faint: #a0958a; --live: #a89d92;
+    --accent: #d9382f; --accent-dn: #b52d26; --accent-bg: #fbe9e6; --on-accent: #fff;
+    --dark: #1c1917; --on-dark: #fff;
+    --me: #157a5b; --s1: #2b5fd9; --s2: #c24a12; --s3: #7a3fd1; --s4: #0c7a8a; --s5: #b11f3a; --s6: #4f7a12; --s7: #9a6a08; --s8: #b3236f;
+    --shadow: 0 1px 2px rgba(60, 40, 20, .06), 0 8px 24px -12px rgba(60, 40, 20, .18);
+    --display: "Newsreader", Georgia, "Times New Roman", serif; --sans: "Inter", "Segoe UI", system-ui, sans-serif; --mono: "IBM Plex Mono", Consolas, ui-monospace, monospace;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+    --paper: #141216; --paper-2: #1b181e; --card: #1e1b22; --line: rgba(255,255,255,.09); --line-strong: rgba(255,255,255,.18);
+    --ink: #f2eeee; --ink-soft: #a69fa3; --ink-faint: #6f686d; --live: #7d757a;
+    --accent: #ef5a4f; --accent-dn: #d64a40; --accent-bg: rgba(239,90,79,.16);
+    --dark: #f2eeee; --on-dark: #141216;
+    --me: #5fcf9f; --s1: #86a4ff; --s2: #ff9a66; --s3: #bf96ff; --s4: #5ccbe0; --s5: #ff7a8e; --s6: #a3d65a; --s7: #e6b84a; --s8: #ff85c2;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.6);
+    color-scheme: dark;
+  } }
+  :root[data-theme="dark"] {
+    --paper: #141216; --paper-2: #1b181e; --card: #1e1b22; --line: rgba(255,255,255,.09); --line-strong: rgba(255,255,255,.18);
+    --ink: #f2eeee; --ink-soft: #a69fa3; --ink-faint: #6f686d; --live: #7d757a;
+    --accent: #ef5a4f; --accent-dn: #d64a40; --accent-bg: rgba(239,90,79,.16);
+    --dark: #f2eeee; --on-dark: #141216;
+    --me: #5fcf9f; --s1: #86a4ff; --s2: #ff9a66; --s3: #bf96ff; --s4: #5ccbe0; --s5: #ff7a8e; --s6: #a3d65a; --s7: #e6b84a; --s8: #ff85c2;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.6);
+    color-scheme: dark;
+  }
   * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.55 "Segoe UI", Inter, system-ui, sans-serif; }
-  .wrap { max-width: 880px; margin: 0 auto; padding: 56px 24px 80px; }
-  h1 { font-size: 34px; letter-spacing: -.02em; margin: 0 0 6px; }
-  .sub { color: var(--muted); margin: 0 0 40px; }
-  .app { display: grid; grid-template-columns: 56px 1fr; gap: 20px; background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 22px 24px; margin-bottom: 16px; }
-  .app img { width: 56px; height: 56px; }
-  .app h2 { margin: 2px 0 4px; font-size: 20px; }
-  .app p { margin: 0 0 14px; color: var(--muted); font-size: 15px; }
-  .app ul { margin: 0 0 16px; padding-left: 18px; color: var(--muted); font-size: 14px; }
-  .btns { display: flex; gap: 10px; flex-wrap: wrap; }
-  a.btn { display: inline-flex; align-items: center; height: 36px; padding: 0 18px; border-radius: 999px; border: 1px solid var(--line); text-decoration: none; color: var(--text); background: var(--card); font-size: 15px; }
-  a.btn:hover { background: #faf8f5; }
-  a.btn.primary { background: var(--primary); border-color: var(--primary); color: #fff; font-weight: 600; }
-  a.btn.primary:hover { background: #ee5a5f; }
-  .note { font-size: 13px; color: var(--muted); margin-top: 8px; }
-  footer { margin-top: 40px; color: var(--muted); font-size: 13px; }
-  footer a { color: inherit; }
-  @media (max-width: 560px) { .app { grid-template-columns: 1fr; } .app img { width: 44px; height: 44px; } }
+  html, body { height: 100%; margin: 0; }
+  body { background: var(--paper); color: var(--ink); font: 15px/1.5 var(--sans); display: flex; flex-direction: column; -webkit-font-smoothing: antialiased; }
+  body::before { content: ""; position: fixed; inset: 0; pointer-events: none; z-index: -1;
+    background: radial-gradient(1200px 500px at 15% -10%, var(--accent-bg), transparent 60%), radial-gradient(900px 400px at 100% 0%, var(--paper-2), transparent 55%); }
+  a { color: inherit; }
+  .top { display: flex; align-items: center; gap: 14px; padding: 18px max(16px, env(safe-area-inset-right, 0px)) 0 max(16px, env(safe-area-inset-left, 0px)); }
+  @media (min-width: 700px) { .top { padding-left: 28px; padding-right: 28px; } }
+  .top .logo { width: 34px; height: 34px; flex: none; border-radius: 9px; }
+  .top h1 { font: 500 27px/1 var(--display); letter-spacing: -.01em; margin: 0; }
+  .top .hub { color: var(--ink-soft); font-size: 13px; text-decoration: none; margin-left: 4px; border-bottom: 1px solid transparent; }
+  .top .hub:hover { color: var(--ink); border-color: var(--line-strong); }
+  .pill { display: inline-flex; align-items: center; gap: 8px; height: 30px; padding: 0 14px 0 12px; border: 1px solid var(--line); border-radius: 999px; background: var(--card); color: var(--ink-soft); font: 500 12px var(--mono); letter-spacing: .02em; }
+  .pill .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ink-faint); }
+  .pill.rec { background: var(--accent-bg); border-color: transparent; color: var(--accent); }
+  .pill.rec .dot { background: var(--accent); animation: pulse 1.2s infinite; }
+  @keyframes pulse { 50% { opacity: .35; } }
+  @media (prefers-reduced-motion: reduce) { .pill.rec .dot { animation: none; } }
+  .spacer { flex: 1; }
+  button { font: 500 14px var(--sans); cursor: pointer; border: 1px solid var(--line-strong); background: var(--card); color: var(--ink); border-radius: 999px; height: 34px; padding: 0 16px; transition: background .12s, border-color .12s; }
+  button:hover { background: var(--paper-2); }
+  button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  button:disabled { background: var(--paper-2); color: var(--ink-faint); cursor: not-allowed; border-color: transparent; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; height: 38px; padding: 0 26px; box-shadow: 0 6px 18px -8px var(--accent); }
+  button.primary:hover { background: var(--accent-dn); }
+  button.dark { background: var(--dark); border-color: var(--dark); color: var(--on-dark); font-weight: 600; height: 38px; padding: 0 26px; }
+  button.dark:hover { opacity: .9; }
+  button.icon { width: 34px; padding: 0; display: inline-grid; place-items: center; color: var(--ink-soft); font-size: 15px; }
+  .card { margin: 18px 16px 0; background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px 20px; display: flex; flex-wrap: wrap; gap: 14px 28px; align-items: center; box-shadow: var(--shadow); }
+  @media (min-width: 700px) { .card, .panel, .status, .banner { margin-left: 28px; margin-right: 28px; } }
+  .switch { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; user-select: none; background: none; border: 0; padding: 0; height: 28px; border-radius: 6px; font-weight: 500; }
+  .switch .track { width: 40px; height: 22px; border-radius: 11px; background: var(--line-strong); position: relative; transition: background .15s; flex: none; }
+  .switch .track::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: transform .15s; box-shadow: 0 1px 2px rgba(0,0,0,.25); }
+  .switch[aria-checked="true"] .track { background: var(--accent); }
+  .switch[aria-checked="true"] .track::after { transform: translateX(18px); }
+  .switch:disabled { opacity: .5; cursor: not-allowed; }
+  input.num { width: 56px; height: 28px; border: 1px solid var(--line-strong); border-radius: 8px; text-align: center; font: 500 14px var(--mono); color: var(--ink); background: var(--card); }
+  input.num:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .hint { width: 100%; color: var(--ink-soft); font-size: 13px; margin-top: -2px; line-height: 1.55; }
+  .hint b { color: var(--ink); font-weight: 600; }
+  .panel { flex: 1; min-height: 0; margin: 14px 16px 0; background: var(--card); border: 1px solid var(--line); border-radius: 14px; display: flex; flex-direction: column; overflow: hidden; box-shadow: var(--shadow); }
+  .exportbar { display: none; align-items: center; gap: 8px; padding: 12px 18px; border-bottom: 1px solid var(--line); flex-wrap: wrap; background: var(--paper-2); }
+  .exportbar.show { display: flex; }
+  .exportbar .lbl { color: var(--ink-soft); font: 500 11px var(--mono); letter-spacing: .12em; text-transform: uppercase; margin-right: 6px; }
+  .exportbar button { height: 32px; }
+  .exportbar .switch { margin-left: 10px; }
+  .exportbar .drive { margin-left: auto; }
+  .tv { flex: 1; overflow: auto; padding: 10px 22px 22px; }
+  .e { display: grid; grid-template-columns: 120px 1fr; gap: 0 22px; padding: 14px 0; border-top: 1px solid var(--line); }
+  .e:first-child { border-top: 0; }
+  .e .who { font-weight: 600; font-size: 14px; letter-spacing: -.005em; }
+  .e .t { font: 12px var(--mono); color: var(--ink-faint); margin-top: 4px; font-variant-numeric: tabular-nums; }
+  .e .x { font-size: 16px; line-height: 1.65; white-space: pre-wrap; max-width: 72ch; }
+  .e.live { border-top-style: dashed; }
+  .e.live .who, .e.live .x { color: var(--live); }
+  .e.live .x { font-style: italic; }
+  .e.shot .who { color: var(--ink-faint); }
+  .e.shot img { display: block; max-width: 440px; width: 100%; border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); }
+  .e.shot .cap { font: 12px var(--mono); color: var(--ink-faint); margin-top: 8px; }
+  .e.err .who { color: var(--accent); }
+  .empty { color: var(--ink-soft); text-align: center; padding: 16vh 20px 0; }
+  .empty h2 { font: 500 30px/1.15 var(--display); color: var(--ink); margin: 0 0 10px; text-wrap: balance; }
+  .empty p { margin: 6px auto; max-width: 52ch; }
+  .status { padding: 8px 16px 14px; color: var(--ink-soft); font: 13px var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .banner { margin: 12px 16px 0; padding: 10px 16px; border: 1px solid transparent; background: var(--accent-bg); border-radius: 12px; display: none; align-items: center; gap: 10px; font-size: 14px; }
+  .banner.show { display: flex; }
+  .banner button { height: 30px; }
+  dialog { border: 1px solid var(--line); border-radius: 14px; padding: 22px 24px; width: min(520px, 92vw); color: var(--ink); background: var(--card); box-shadow: var(--shadow); }
+  dialog::backdrop { background: rgba(20, 16, 14, .45); }
+  dialog h2 { margin: 0 0 8px; font: 500 22px var(--display); }
+  dialog p { margin: 6px 0 12px; color: var(--ink-soft); font-size: 14px; }
+  dialog input.text { width: 100%; height: 36px; border: 1px solid var(--line-strong); border-radius: 8px; padding: 0 12px; font: inherit; background: var(--card); color: var(--ink); }
+  dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+  dialog code { font-family: var(--mono); font-size: 13px; background: var(--paper-2); padding: 1px 6px; border-radius: 4px; }
+  @media (max-width: 640px) {
+    .top { flex-wrap: wrap; }
+    .e { grid-template-columns: 1fr; gap: 2px; }
+    .e .t { margin-top: 0; }
+  }
 </style>
+<script>
+  // Theme: follows the system unless the viewer picked one; the choice is remembered per browser.
+  (function () { try { const t = localStorage.getItem('transcriber.theme'); if (t === 'dark' || t === 'light') document.documentElement.setAttribute('data-theme', t); } catch (e) {} })();
+</script>
 </head>
 <body>
-<div class="wrap">
-  <h1>Bharath AI</h1>
-  <p class="sub">Small utilities that run in your browser or on your Windows machine. No accounts, no installs.</p>
+<header class="top">
+  <img class="logo" src="icon.svg" alt="">
+  <h1>Transcriber</h1>
+  <a class="hub" href="../">All tools</a>
+  <span class="pill" id="pill"><span class="dot"></span><span id="pillText">Idle</span></span>
+  <span class="spacer"></span>
+  <button class="icon" id="btnTheme" title="Light / dark" aria-label="Toggle light or dark theme">&#9681;</button>
+  <button class="icon" id="btnSettings" title="Google Drive settings" aria-label="Settings">&#9881;</button>
+  <button class="primary" id="btnStart">Start</button>
+</header>
 
-  <section class="app">
-    <img src="transcriber/icon.svg" alt="">
-    <div>
-      <h2>Transcriber</h2>
-      <p>Live meeting transcription with timed screenshots. Hears the other participants through a screen share and you through the microphone, then exports Text, HTML, PDF or Word, optionally straight to Google Drive.</p>
-      <ul>
-        <li><b>Browser:</b> Chrome or Edge. Live words as people speak, remote voices labeled Speaker 1, Speaker 2, ... Nothing leaves your machine unless you save to Drive.</li>
-        <li><b>Windows app:</b> same features, fully offline, no share prompt, higher accuracy. Unzip and run.</li>
-      </ul>
-      <div class="btns">
-        <a class="btn primary" href="transcriber/">Open in browser</a>
-        <a class="btn" href="https://github.com/bharath-vayu/Bharath-AI/releases/latest">Download for Windows</a>
-      </div>
-      <div class="note">Tip: open it in Chrome or Edge, then use the install icon at the right end of the address bar (or menu → Install Transcriber) to get it as a desktop app with its own window and Start menu entry. It keeps updating from this site.</div>
-      <div class="note">Windows may show "Windows protected your PC" for the download because it is unsigned. More info, Run anyway.</div>
-    </div>
-  </section>
-
-  <footer>Source and issues on <a href="https://github.com/bharath-vayu/Bharath-AI">GitHub</a>.</footer>
+<div class="banner" id="restoreBanner">
+  <span>A previous session was not exported. </span>
+  <button id="btnRestore">Restore it</button>
+  <button id="btnDiscard">Discard</button>
 </div>
+
+<section class="card">
+  <button class="switch" role="switch" aria-checked="true" id="swSys"><span class="track"></span><span>System audio (others)</span></button>
+  <button class="switch" role="switch" aria-checked="true" id="swMic"><span class="track"></span><span>Microphone (me)</span></button>
+  <button class="switch" role="switch" aria-checked="true" id="swShot"><span class="track"></span><span>Screenshot every</span></button>
+  <input class="num" type="number" id="interval" min="5" max="3600" value="60" aria-label="Screenshot interval in seconds"> <span style="color:var(--muted)">seconds</span>
+  <div class="hint">Start asks you to share a screen, window or tab. Tick <b>Share system audio</b> (or <b>Share tab audio</b>) in that dialog so the other participants are heard. Screenshots come from the same share. Wear headphones so the microphone hears only you; remote voices are labeled Speaker 1, Speaker 2, ... by voice. All three switches and the interval can be changed while recording.</div>
+</section>
+
+<section class="panel">
+  <div class="exportbar" id="exportbar">
+    <span class="lbl">Save as</span>
+    <button data-fmt="txt">Text</button>
+    <button data-fmt="html">HTML</button>
+    <button data-fmt="pdf">PDF</button>
+    <button data-fmt="docx">Word</button>
+    <button class="switch" role="switch" aria-checked="true" id="swInclude"><span class="track"></span><span>Include screenshots</span></button>
+    <button class="drive" id="btnDrive">Save to Google Drive</button>
+  </div>
+  <div class="tv" id="tv">
+    <div class="empty" id="empty"><h2>Every word, as it is said.</h2><p>Press <b>Start</b>. Live words appear as people talk, each finished statement becomes a row with its speaker, and screenshots land in between.</p><p>Chrome or Edge. Nothing is uploaded unless you press Save to Google Drive.</p></div>
+  </div>
+</section>
+<div class="status" id="status">Ready.</div>
+
+<dialog id="dlgSettings">
+  <h2>Google Drive</h2>
+  <p>Paste the OAuth Client ID of your Google Cloud project. Transcripts are saved to a <code>Transcriber</code> folder in the Drive of whoever is signed in. See the README for the one-time setup.</p>
+  <input class="text" id="clientId" placeholder="xxxxxxxx.apps.googleusercontent.com" spellcheck="false">
+  <div class="row"><button id="dlgCancel">Cancel</button><button class="dark" id="dlgSave" style="height:34px">Save</button></div>
+</dialog>
+
+<dialog id="dlgDrive">
+  <h2>Save to Google Drive</h2>
+  <p>Format</p>
+  <div style="display:flex;gap:8px;flex-wrap:wrap" id="driveFmts">
+    <button data-fmt="html" class="dark" style="height:32px">HTML</button><button data-fmt="pdf">PDF</button><button data-fmt="docx">Word</button><button data-fmt="txt">Text</button>
+  </div>
+  <div class="row"><button id="dlgDriveCancel">Cancel</button></div>
+</dialog>
+
+<script src="https://cdn.jsdelivr.net/npm/vosk-browser@0.0.8/dist/vosk.js" crossorigin="anonymous"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.js" crossorigin="anonymous"></script>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script>
+  document.getElementById('btnTheme').addEventListener('click', () => {
+    const root = document.documentElement, sys = matchMedia('(prefers-color-scheme: dark)').matches;
+    const cur = root.getAttribute('data-theme') || (sys ? 'dark' : 'light'), next = cur === 'dark' ? 'light' : 'dark';
+    root.setAttribute('data-theme', next); try { localStorage.setItem('transcriber.theme', next); } catch (e) {}
+  });
+</script>
+<script src="app.js"></script>
 </body>
 </html>
