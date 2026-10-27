@@ -35,7 +35,11 @@ How it works, all inside the browser, nothing uploaded:
 
 - **Your microphone** uses the browser's own recognizer (Chrome/Edge): instant, phrase-aware, no download. Labeled "Me".
 - **The shared audio** goes through Vosk (live words, sentence boundaries), then whisper (transformers.js) rewrites each
-  finished sentence more accurately a few seconds later; if the machine cannot keep up, the Vosk text simply stays.
+  finished statement more accurately a few seconds later; if the machine cannot keep up, the Vosk text simply stays.
+  On a machine with WebGPU (Chrome/Edge with a working GPU) the larger whisper small.en runs on the GPU (~300 MB once);
+  otherwise whisper base.en runs on the CPU. The status line says which one is active after loading.
+- Each statement is scanned in 2-second windows for voice changes and split where the voice changes, so quick
+  back-and-forth between people comes out as separate labeled rows even without a pause.
 - **WavLM speaker embeddings** label the remote voices Speaker 1, Speaker 2, ... per sentence. Until that model has
   finished starting (20-40 s after the page opens), sentences are labeled "Others".
 - **Screenshots** from the share every N seconds (default 60), identical frames skipped.
@@ -50,6 +54,13 @@ visit, which is expected.
 Tips: wear headphones so the microphone hears only you. A window share carries no audio on Windows; share the whole
 screen or the tab. The Windows app in Releases does the same job fully offline with no share prompt.
 
+### On a phone or tablet
+
+Mobile browsers cannot capture the screen or system audio (a platform rule, not a setting), so the page switches to
+**phone mode** automatically: microphone only, the browser's own recognizer, no model downloads. Put the phone where it
+hears everyone; every line is labeled "Mic". Exports work the same. Add it to the home screen from the browser menu to
+launch it like an app.
+
 ## Save to Google Drive (optional, one time)
 
 Anyone using the site can save transcripts into their own Google Drive. Setup is a free Google Cloud OAuth client:
@@ -60,11 +71,14 @@ Anyone using the site can save transcripts into their own Google Drive. Setup is
    `.../auth/drive.file` → Test users: add your Gmail (and anyone else who will use it) → save.
 4. **APIs & Services → Credentials → Create credentials → OAuth client ID** → Web application →
    Authorized JavaScript origins: `https://<your-username>.github.io` → Create. Copy the Client ID.
-5. Open Transcriber, click the gear, paste the Client ID, Save. It is stored in that browser only.
+5. Open Transcriber → Settings, paste the Client ID, Save, then **Connect Google Drive** and sign in once.
 
-"Save to Google Drive" then signs in with Google and uploads into a `Transcriber` folder in the signed-in account's
-Drive. The `drive.file` scope only lets the app see files it created. While the consent screen is in "Testing", only
-the test users you listed can sign in; click "Publish app" on the consent screen to open it to everyone.
+From then on every session is saved automatically (text and screenshots) to `Transcriber/sessions` in that account's
+Drive, during the recording every 3 minutes and at Stop, and listed under **My recordings** on any device where you
+connect. "Save to Google Drive" in the transcript bar additionally uploads an export in the format you pick.
+The `drive.file` scope only lets the app see files it created. Google issues one-hour tokens to web pages; the page
+renews them silently. On the consent screen click **Publish app** (no review is needed for this scope), otherwise
+Google expires the sign-in after 7 days while the app is in "Testing".
 
 ## Adding a tool later
 
