@@ -12,7 +12,7 @@
   const SR = 16000;
 
   const MOBILE = !(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia);   // phones and tablets: microphone only
-  const S = { running: false, active: { Others: true, Me: true }, started: null, t0: 0, segs: [], shots: [], live: { Me: '', Others: '' }, lastWho: '', lastT1: -100, pendingOthers: 0, spkLog: [] };
+  const S = { running: false, active: { Others: true, Me: true }, started: null, t0: 0, segs: [], shots: [], live: { Me: '', Others: '' }, lastWho: '', lastT1: -100, pendingOthers: 0, spkLog: [], names: {} };
   let display = null, mic = null, worker = null, workerReady = false, shotTimer = null, clockTimer = null, video = null, lastShotHash = 0, jobs = new Map(), jobSeq = 0;
 
   const now = () => (performance.now() - S.t0) / 1000;
@@ -26,6 +26,11 @@
   const SPK_HEX = ['#2b5fd9', '#c24a12', '#7a3fd1', '#0c7a8a', '#b11f3a', '#4f7a12', '#9a6a08', '#b3236f'];
   const whoColor = w => w === 'Me' || w === 'Mic' ? 'var(--me)' : w.startsWith('Speaker ') ? `var(--s${(parseInt(w.slice(8)) - 1) % 8 + 1})` : 'var(--ink-soft)';
   const whoHex = w => w === 'Me' || w === 'Mic' ? '#157a5b' : w.startsWith('Speaker ') ? SPK_HEX[(parseInt(w.slice(8)) - 1) % 8] : '#6f655d';
+  // Speakers can be renamed (S.names maps a voice id such as "Speaker 2" to the name shown); two voices given the
+  // same name share that name's color and read as one person.
+  const disp = w => S.names[w] || w;
+  const num = w => w.startsWith('Speaker ') ? parseInt(w.slice(8)) : 99;
+  const colorKey = w => { const n = disp(w); let k = w; for (const id in S.names) if (S.names[id] === n && num(id) < num(k)) k = id; return k; };
   document.querySelectorAll('.switch').forEach(sw => sw.addEventListener('click', () => { if (sw.disabled) return; setOn(sw, !on(sw)); if (sw === swInclude) rebuildView(); else if (S.running) liveToggle(sw).catch(e => setStatus('Could not change that: ' + e.message)); }));
   // Switches work while recording: pausing a source keeps its stream and just stops feeding it; enabling a source
   // that was never started acquires it (the browser will prompt for the share or the microphone).
@@ -57,11 +62,11 @@
     const d = document.createElement('div');
     if (e.kind === 'shot') {
       d.className = 'e shot';
-      d.innerHTML = `<div><div class="who">Screenshot</div><div class="t">${ms(e.t)}</div></div><div><img alt="Screenshot at ${ms(e.t)}"><div class="cap">${esc(e.file)}</div></div>`;
+      d.dataset.file = e.file; d.innerHTML = `<div><div class="who">Screenshot</div><div class="t">${ms(e.t)}</div></div><div><img alt="Screenshot at ${ms(e.t)}"><div class="cap">${esc(e.file)}</div></div>`;
       d.querySelector('img').src = e.data;
     } else {
       d.className = 'e' + (e.kind === 'err' ? ' err' : '');
-      d.innerHTML = `<div><div class="who" style="color:${e.kind === 'err' ? 'var(--accent)' : whoColor(e.who)}">${esc(e.who)}</div><div class="t">${ms(e.t)}</div></div><div class="x"></div>`;
+      d.innerHTML = `<div><div class="who" style="color:${e.kind === 'err' ? 'var(--accent)' : whoColor(colorKey(e.id || e.who))}">${esc(e.who)}</div><div class="t">${ms(e.t)}</div></div><div class="x"></div>`;
       d.querySelector('.x').textContent = e.text;
     }
     return d;
@@ -74,6 +79,7 @@
     if (merge && last && !last.classList.contains('shot') && last.dataset.who === e.who) { node = last; node._segs.push(seg || { text: e.text }); }
     else { node = entryNode(e); node.dataset.who = e.who || ''; node._segs = [seg || { text: e.text }]; if (liveBox) tv.insertBefore(node, liveBox); else tv.appendChild(node); }
     if (seg) { seg.node = node; refreshNode(node); }
+    else if (e.segs) { node._segs = e.segs; for (const sg of e.segs) sg.node = node; }   // rebuilt rows stay linked to their sentences for later rewrites
     tv.scrollTop = tv.scrollHeight;
   }
   function refreshNode(node) { const x = node.querySelector('.x'); if (x && node._segs) x.textContent = node._segs.map(s => s.text).join(' '); }
@@ -90,14 +96,43 @@
   function merged(withShots) {
     const v = []; let lw = '', lt = -100;
     for (const s of [...S.segs].sort((a, b) => a.t0 - b.t0)) {
-      if (v.length && v[v.length - 1].kind === 'text' && s.who === lw && s.who !== 'Others' && s.t0 - lt < 15) v[v.length - 1].text += ' ' + s.text;
-      else v.push({ kind: 'text', who: s.who, text: s.text, t: s.t0 });
-      lw = s.who; lt = s.t1;
+      const name = disp(s.who);
+      if (v.length && v[v.length - 1].kind === 'text' && name === lw && s.who !== 'Others' && s.t0 - lt < 15 && !(withShots && S.shots.some(sh => sh.t >= lt && sh.t <= s.t0))) { v[v.length - 1].text += ' ' + s.text; v[v.length - 1].segs.push(s); }
+      else v.push({ kind: 'text', who: name, id: s.who, text: s.text, t: s.t0, segs: [s] });
+      lw = name; lt = s.t1;
     }
     if (withShots) for (const sh of S.shots) v.push({ kind: 'shot', file: sh.file, data: sh.data, t: sh.t });
     return v.sort((a, b) => a.t - b.t);
   }
-  function rebuildView() { tv.innerHTML = ''; liveBox = null; $('search').value = ''; for (const e of merged(on(swInclude))) addEntry(e, false); tv.scrollTop = 0; }
+  function rebuildView() { tv.innerHTML = ''; liveBox = null; $('search').value = ''; for (const e of merged(on(swInclude))) addEntry(e, false); tv.scrollTop = 0; renderSpeakers(); renderShots(); }
+  // ---- right rail: speakers (renamable) and screenshot thumbnails
+  let spkTimer = 0;
+  function renderSpeakers() {
+    const list = $('spkList'); if (!list) return;
+    const rows = [], byName = {};   // one row per shown name; voices renamed to the same name are one row
+    for (const s of S.segs) { const n = disp(s.who); if (!byName[n]) { byName[n] = { ids: [], t: 0 }; rows.push(n); } const r = byName[n]; if (!r.ids.includes(s.who)) r.ids.push(s.who); r.t += Math.max(0, s.t1 - s.t0); }
+    list.innerHTML = ''; if (!rows.length) { list.innerHTML = '<div class="none">No one yet.</div>'; return; }
+    for (const name of rows) {
+      const r = byName[name], d = document.createElement('div'); d.className = 'spk';
+      d.innerHTML = `<span class="dot"></span><span class="nm" title="Click to rename"></span><span class="ct"></span>`;
+      d.querySelector('.dot').style.background = whoColor(colorKey(r.ids[0])); d.querySelector('.nm').textContent = name; d.querySelector('.ct').textContent = ms(r.t);
+      d.querySelector('.nm').addEventListener('click', () => {
+        const inp = document.createElement('input'); inp.value = name; inp.maxLength = 40; d.replaceChild(inp, d.querySelector('.nm')); inp.focus(); inp.select();
+        let done = false; const commit = () => { if (done) return; done = true; const v = inp.value.trim(); for (const id of r.ids) { if (v && v !== id) S.names[id] = v; else delete S.names[id]; } rebuildView(); autosave(); };
+        inp.addEventListener('keydown', ev => { if (ev.key === 'Enter') commit(); if (ev.key === 'Escape') { done = true; renderSpeakers(); } }); inp.addEventListener('blur', commit);
+      });
+      list.appendChild(d);
+    }
+  }
+  function renderShots() {
+    const list = $('shotList'); if (!list) return; list.innerHTML = ''; $('shotCount').textContent = S.shots.length ? String(S.shots.length) : '';
+    if (!S.shots.length) { list.innerHTML = '<div class="none">None yet.</div>'; return; }
+    for (const sh of S.shots) {
+      const d = document.createElement('div'); d.innerHTML = `<img alt="Screenshot at ${ms(sh.t)}"><div class="tt">${ms(sh.t)}</div>`; d.querySelector('img').src = sh.data;
+      d.querySelector('img').addEventListener('click', () => { const n = tv.querySelector(`.e.shot[data-file="${sh.file}"]`); if (n) n.scrollIntoView({ behavior: 'smooth', block: 'center' }); });
+      list.appendChild(d);
+    }
+  }
 
   // ---------------------------------------------------------------- autosave (IndexedDB)
   const idb = { db: null,
@@ -106,7 +141,7 @@
     get() { return new Promise(r => { try { const q = this.db.transaction('s').objectStore('s').get('current'); q.onsuccess = () => r(q.result); q.onerror = () => r(null); } catch (e) { r(null); } }); },
     del() { try { this.db.transaction('s', 'readwrite').objectStore('s').delete('current'); } catch (e) {} } };
   let saveTimer = 0;
-  const autosave = () => { clearTimeout(saveTimer); saveTimer = setTimeout(() => idb.put({ started: S.started, segs: S.segs, shots: S.shots }), 400); };
+  const autosave = () => { clearTimeout(saveTimer); saveTimer = setTimeout(() => idb.put({ started: S.started, segs: S.segs, shots: S.shots, names: S.names }), 400); };
 
   // ---------------------------------------------------------------- voice-gated chunker (same logic as the desktop app)
   class Chunker {
@@ -180,7 +215,9 @@
   function final(who, text, t0, t1) {
     const s = { who, text, t0, t1 }; S.segs.push(s); applyPending();
     // consecutive rows join into a paragraph only when the same identified voice continues; unlabelled rows stay separate
-    addEntry({ kind: 'text', who, text, t: t0 }, who === S.lastWho && who !== 'Others' && t0 - S.lastT1 < 15, s); S.lastWho = who; S.lastT1 = t1; autosave();
+    const name = disp(who);
+    addEntry({ kind: 'text', who: name, id: who, text, t: t0 }, name === S.lastWho && who !== 'Others' && t0 - S.lastT1 < 15, s); S.lastWho = name; S.lastT1 = t1; autosave();
+    clearTimeout(spkTimer); spkTimer = setTimeout(renderSpeakers, 500);
     return s;
   }
 
@@ -251,13 +288,27 @@
   const NEW_VOICE = 0.42;
   function assignSpeaker(emb, seconds) {
     let best = -1, bestSim = -1;
-    spk.forEach((k, i) => { const c = cosine(emb, k.c); if (c > bestSim) { bestSim = c; best = i; } });
+    spk.forEach((k, i) => { if (k.into) return; const c = cosine(emb, k.c); if (c > bestSim) { bestSim = c; best = i; } });
     const clearlyNew = bestSim < NEW_VOICE && seconds >= 2.5 || bestSim < SAME_VOICE && seconds >= 4;
     S.spkLog.push([+bestSim.toFixed(2), +seconds.toFixed(1), clearlyNew ? 'new' : best + 1]); if (S.spkLog.length > 300) S.spkLog.shift();
     if (best >= 0 && (!clearlyNew || spk.length >= 8)) {
-      const k = spk[best], w = 1 / (k.n + 1); for (let i = 0; i < emb.length; i++) k.c[i] = k.c[i] * (1 - w) + emb[i] * w; k.n = Math.min(20, k.n + 1); return best + 1;
+      const k = spk[best];   // only a confident match refines the voice's fingerprint, so a doubtful piece cannot drag it towards another voice
+      if (bestSim >= SAME_VOICE) { const w = 1 / (k.n + 1); for (let i = 0; i < emb.length; i++) k.c[i] = k.c[i] * (1 - w) + emb[i] * w; k.n = Math.min(20, k.n + 1); mergeLookalikes(); }
+      return k.into || best + 1;
     }
     spk.push({ c: emb.slice(), n: 1 }); return spk.length;
+  }
+  // Two voices that have each been heard several times and whose fingerprints have become near-identical are the
+  // same person; the later number folds into the earlier one and its rows are relabeled.
+  function mergeLookalikes() {
+    for (let i = 0; i < spk.length; i++) for (let j = i + 1; j < spk.length; j++) {
+      const a = spk[i], b = spk[j]; if (a.into || b.into || a.n < 3 || b.n < 3 || cosine(a.c, b.c) < 0.72) continue;
+      const wa = a.n / (a.n + b.n); for (let x = 0; x < a.c.length; x++) a.c[x] = a.c[x] * wa + b.c[x] * (1 - wa); a.n = Math.min(20, a.n + b.n); b.into = a.into || i + 1;
+      const from = 'Speaker ' + (j + 1), to = 'Speaker ' + b.into; let changed = false;
+      for (const sg of S.segs) if (sg.who === from) { sg.who = to; changed = true; }
+      if (changed) { rebuildView(); S.lastWho = ''; autosave(); }
+      return;
+    }
   }
   const liveUpdaters = {};
   function onEmbedding(m) {
@@ -419,7 +470,7 @@
     const px = sg.getImageData(0, 0, 96, 54).data; let h = 2166136261; for (let i = 0; i < px.length; i += 4) { h = Math.imul(h ^ (px[i] >> 3), 16777619); h = Math.imul(h ^ (px[i + 1] >> 3), 16777619); h = Math.imul(h ^ (px[i + 2] >> 3), 16777619); }
     if (h === lastShotHash) return; lastShotHash = h;
     const t = now(), file = `shot_${pad(S.shots.length + 1).padStart(4, '0')}_${hms(t).replace(/:/g, '-')}.jpg`, data = c.toDataURL('image/jpeg', 0.82);
-    S.shots.push({ t, file, data }); addEntry({ kind: 'shot', file, data, t }, false); S.lastWho = ''; autosave();
+    S.shots.push({ t, file, data }); addEntry({ kind: 'shot', file, data, t }, false); S.lastWho = ''; autosave(); renderShots();
   }
   intervalEl.addEventListener('change', restartShotTimer);
 
@@ -427,8 +478,8 @@
   async function start() {
     const wantSys = !MOBILE && on(swSys), wantMic = on(swMic), wantShot = !MOBILE && on(swShot);
     if (!wantSys && !wantMic) { setStatus('Turn on at least one audio source.'); return; }
-    S.running = true; S.started = new Date(); S.t0 = performance.now(); spk.length = 0; embJobs.clear(); S.spkLog = []; S.segs = []; S.shots = []; S.live = { Me: '', Others: '' }; S.lastWho = ''; S.lastT1 = -100; S.pendingOthers = 0; lastShotHash = 0;
-    tv.innerHTML = ''; liveBox = null; exportbar.classList.remove('show'); $('restoreBanner').classList.remove('show'); $('search').value = '';
+    S.running = true; S.started = new Date(); S.t0 = performance.now(); spk.length = 0; embJobs.clear(); S.spkLog = []; S.names = {}; S.segs = []; S.shots = []; S.live = { Me: '', Others: '' }; S.lastWho = ''; S.lastT1 = -100; S.pendingOthers = 0; lastShotHash = 0;
+    tv.innerHTML = ''; liveBox = null; exportbar.classList.remove('show'); $('restoreBanner').classList.remove('show'); $('search').value = ''; renderSpeakers(); renderShots();
     sessionFileId = null; clearInterval(sessionSaveTimer); sessionSaveTimer = setInterval(() => saveSession(false), 180000);
     S.active = { Others: wantSys, Me: wantMic }; btnStart.disabled = true;
     try {
@@ -462,7 +513,7 @@
     pill.classList.remove('rec'); pillText.textContent = 'Idle';
     setOn(swInclude, S.shots.length > 0); exportbar.classList.add('show'); rebuildView();
     setStatus(`Stopped. ${S.segs.length} sentences, ${S.shots.length} screenshots. Save it with the buttons above; nothing is kept once this tab is closed and discarded.`);
-    idb.put({ started: S.started, segs: S.segs, shots: S.shots });
+    idb.put({ started: S.started, segs: S.segs, shots: S.shots, names: S.names });
     clearInterval(sessionSaveTimer); saveSession(true);
   }
   btnStart.addEventListener('click', () => S.running ? stop() : start());
@@ -479,7 +530,7 @@
     let o = `<!doctype html><html><head><meta charset="utf-8"><title>${esc(d.title)}</title><style>body{font:16px/1.65 'Segoe UI',Inter,system-ui,sans-serif;max-width:960px;margin:40px auto;padding:0 24px;color:#1d1c1a;background:#f7f5f1}h1{font-size:26px;margin:0 0 4px}.meta{color:#8a857d;font-size:13px;letter-spacing:.04em;text-transform:uppercase;margin-bottom:28px}.e{display:grid;grid-template-columns:130px 1fr;gap:12px 20px;padding:14px 0;border-top:1px solid #e9e5df}.who{font-weight:600}.t{font:12px Consolas,monospace;color:#8a857d;margin-top:3px}.x{white-space:pre-wrap}img{max-width:100%;border:1px solid #e3dfd8;border-radius:8px}figure{margin:0}figcaption{font:12px Consolas,monospace;color:#8a857d;margin-top:6px}</style></head><body><h1>${esc(d.title)}</h1><div class="meta">${esc(d.started)} &middot; ${hms(d.duration)}</div>`;
     for (const e of d.entries) o += e.kind === 'shot'
       ? `<div class="e"><div><div class="who" style="color:#8a857d">Screenshot</div><div class="t">${ms(e.t)}</div></div><figure><img loading="lazy" src="${e.data}"><figcaption>${esc(e.file)}</figcaption></figure></div>`
-      : `<div class="e"><div><div class="who" style="color:${whoHex(e.who)}">${esc(e.who)}</div><div class="t">${ms(e.t)}</div></div><div class="x">${esc(e.text)}</div></div>`;
+      : `<div class="e"><div><div class="who" style="color:${whoHex(colorKey(e.id || e.who))}">${esc(e.who)}</div><div class="t">${ms(e.t)}</div></div><div class="x">${esc(e.text)}</div></div>`;
     return new Blob([o + '</body></html>'], { type: 'text/html;charset=utf-8' });
   }
   function imgSize(dataUrl) { return new Promise(r => { const i = new Image(); i.onload = () => r([i.naturalWidth, i.naturalHeight]); i.onerror = () => r([16, 9]); i.src = dataUrl; }); }
@@ -604,7 +655,7 @@
     if (!connected() || (!S.segs.length && !S.shots.length)) return;
     try {
       const tok = await getToken(false); const folder = await folderId(tok, 'sessions', await folderId(tok, 'Transcriber'));
-      const body = new Blob([JSON.stringify({ started: S.started, segs: S.segs, shots: S.shots, engine: S.engine || '' })], { type: 'application/json' });
+      const body = new Blob([JSON.stringify({ started: S.started, segs: S.segs, shots: S.shots, names: S.names, engine: S.engine || '' })], { type: 'application/json' });
       const r = await upload(tok, folder, sessionName(), body, 'application/json', sessionSummary(), sessionFileId); sessionFileId = r.id;
       if (final) { idb.del(); setStatus('Session saved to Google Drive. ' + status.textContent.replace(/^Stopped\. /, '')); refreshLibrary(); }
     } catch (e) { setStatus('Google Drive save failed: ' + e.message + (final ? '. Use the Save buttons instead.' : '')); }
@@ -633,7 +684,7 @@
     try {
       const tok = await getToken(false); setStatus('Loading session…');
       const j = await fetch(`https://www.googleapis.com/drive/v3/files/${id}?alt=media`, { headers: H(tok) }).then(r => r.json());
-      S.started = new Date(j.started); S.segs = j.segs || []; S.shots = j.shots || []; S.engine = j.engine || S.engine; sessionFileId = id;
+      S.started = new Date(j.started); S.segs = j.segs || []; S.shots = j.shots || []; S.names = j.names || {}; S.engine = j.engine || S.engine; sessionFileId = id;
       $('restoreBanner').classList.remove('show'); setOn(swInclude, S.shots.length > 0); exportbar.classList.add('show'); rebuildView(); showView('recorder'); setStatus('Session loaded from Google Drive.');
     } catch (e) { setStatus('Could not load the session: ' + e.message); }
   }
@@ -650,7 +701,7 @@
     const prev = await idb.get();
     if (prev && (prev.segs?.length || prev.shots?.length)) {
       $('restoreBanner').classList.add('show');
-      $('btnRestore').onclick = () => { S.started = new Date(prev.started); S.segs = prev.segs; S.shots = prev.shots; $('restoreBanner').classList.remove('show'); setOn(swInclude, S.shots.length > 0); exportbar.classList.add('show'); rebuildView(); setStatus('Previous session restored.'); };
+      $('btnRestore').onclick = () => { S.started = new Date(prev.started); S.segs = prev.segs; S.shots = prev.shots; S.names = prev.names || {}; $('restoreBanner').classList.remove('show'); setOn(swInclude, S.shots.length > 0); exportbar.classList.add('show'); rebuildView(); setStatus('Previous session restored.'); };
       $('btnDiscard').onclick = () => { idb.del(); $('restoreBanner').classList.remove('show'); };
     }
   })();
@@ -667,7 +718,7 @@
   if (MOBILE) {
     for (const el of [swSys.closest('.seg'), swShot.closest('.seg'), swInclude]) if (el) el.hidden = true;
     setOn(swSys, false); setOn(swShot, false); setOn(swMic, true);
-    const hint = document.querySelector('.hint'); if (hint) hint.innerHTML = 'Phone mode: this device can only listen through its microphone, so put it where it hears everyone. Words appear as people speak; everything is labeled <b>Mic</b>. Screenshots and speaker labels need the desktop version.';
+    const hint = document.querySelector('.hint'); if (hint) hint.hidden = false, hint.innerHTML = 'Phone mode: this device can only listen through its microphone, so put it where it hears everyone. Words appear as people speak; everything is labeled <b>Mic</b>. Screenshots and speaker labels need the desktop version.';
     const empty = $('empty'); if (empty) empty.querySelector('p:last-child').textContent = 'Allow the microphone when asked. Nothing is uploaded unless you connect Google Drive.';
     setStatus('Ready. Phone mode (microphone only).');
   }

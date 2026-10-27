@@ -66,7 +66,7 @@
   button:hover { background: var(--paper-2); }
   button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   button:disabled { background: var(--paper-2); color: var(--ink-faint); cursor: not-allowed; border-color: transparent; }
-  button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; height: 38px; padding: 0 26px; box-shadow: 0 6px 18px -8px var(--accent); }
+  button.primary { white-space: nowrap; background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; height: 38px; padding: 0 26px; box-shadow: 0 6px 18px -8px var(--accent); }
   button.primary:hover { background: var(--accent-dn); }
   button.dark { background: var(--dark); border-color: var(--dark); color: var(--on-dark); font-weight: 600; height: 38px; padding: 0 26px; }
   button.dark:hover { opacity: .9; }
@@ -171,9 +171,30 @@
   .ctrl .seg .lbl small { color: var(--ink-faint); font-size: 12px; }
   .ctrl .seg .switch { gap: 8px; }
   .ctrl .seg .switch span:last-child { display: none; }
-  .ctrl .timer { margin-left: auto; padding: 12px 18px; display: flex; align-items: center; gap: 12px; color: var(--ink-soft); font: 500 13px var(--mono); }
+  .ctrl .go { flex: 1 1 0; display: flex; justify-content: center; padding: 8px 18px; }
+  .ctrl .timer { flex: 1 1 0; justify-content: flex-end; min-width: 0; padding: 12px 18px; display: flex; align-items: center; gap: 12px; color: var(--ink-soft); font: 500 13px var(--mono); }
+  .ctrl .timer span:last-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .ctrl .hint { width: 100%; padding: 0 18px 12px; margin: 0; }
+  .work { display: flex; gap: 14px; flex: 1; min-height: 0; }
   .panel { margin: 0; flex: 1; min-height: 0; }
+  .rail { width: 272px; flex: 0 0 272px; display: flex; flex-direction: column; gap: 14px; min-height: 0; }
+  .rail .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); padding: 14px 16px; display: flex; flex-direction: column; min-height: 0; }
+  .rail .card.grow { flex: 1; }
+  .rail h3 { margin: 0 0 10px; font: 500 17px var(--display); display: flex; align-items: baseline; gap: 8px; }
+  .rail h3 small { font: 400 11px var(--mono); color: var(--ink-faint); letter-spacing: .04em; }
+  .rail .none { color: var(--ink-faint); font-size: 13px; }
+  .spk-list { display: flex; flex-direction: column; gap: 6px; }
+  .spk { display: flex; align-items: center; gap: 10px; font-size: 14px; min-height: 28px; }
+  .spk .dot { width: 10px; height: 10px; border-radius: 50%; flex: 0 0 auto; }
+  .spk .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; cursor: text; border-radius: 6px; padding: 3px 6px; margin-left: -6px; }
+  .spk .nm:hover { background: var(--bg); }
+  .spk input { flex: 1; min-width: 0; height: 28px; border: 1px solid var(--accent); border-radius: 6px; padding: 0 6px; font: inherit; font-weight: 600; background: var(--card); color: var(--ink); }
+  .spk .ct { font: 12px var(--mono); color: var(--ink-faint); white-space: nowrap; }
+  .shot-list { overflow: auto; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; align-content: start; min-height: 0; }
+  .shot-list img { display: block; width: 100%; aspect-ratio: 16/9; object-fit: cover; border: 1px solid var(--line); border-radius: 8px; cursor: pointer; }
+  .shot-list img:hover { border-color: var(--accent); }
+  .shot-list .tt { font: 11px var(--mono); color: var(--ink-faint); margin-top: 3px; }
+  @media (max-width: 1150px) { .rail { display: none; } }
   .panel .phead { display: flex; align-items: center; gap: 12px; padding: 10px 14px 10px 18px; border-bottom: 1px solid var(--line); }
   .panel .phead h2 { font: 500 17px var(--display); margin: 0; }
   .panel .phead .search { margin-left: auto; display: flex; align-items: center; gap: 8px; border: 1px solid var(--line); border-radius: 999px; padding: 0 12px; height: 32px; background: var(--paper); min-width: 0; }
@@ -212,13 +233,14 @@
     nav button { width: auto; height: 36px; padding: 0 12px; gap: 8px; }
     main { height: auto; overflow: visible; padding: 16px; }
     .panel { min-height: 60vh; }
-    .ctrl .timer { margin-left: 0; }
+    .ctrl .timer { margin-left: 0; flex: 1 1 100%; }
+    .ctrl .go { flex: 1 1 100%; padding: 12px 18px 4px; } .ctrl .go button { width: 100%; }
     .mhead h1 { font-size: 28px; }
   }
 </style>
 <div class="studio">
   <aside>
-    <div class="brand"><a href="../" title="All tools"><img src="icon.svg" alt=""><span class="name">Transcriber</span></a><span class="tag">BHARATH AI</span></div>
+    <div class="brand"><a href="../" title="All tools"><img src="icon.svg" alt=""><span class="name">Transcriber</span></a></div>
     <button class="newrec" id="btnNew">+ New recording</button>
     <div class="navlbl">Workspace</div>
     <nav>
@@ -241,17 +263,18 @@
         <div class="right">
           <span class="pill" id="pill"><span class="dot"></span><span id="pillText">Idle</span></span>
           <button class="icon" id="btnSettings" title="Google Drive settings" aria-label="Settings" hidden>&#9881;</button>
-          <button class="primary" id="btnStart">Start recording</button>
         </div>
       </div>
       <div class="banner" id="restoreBanner"><span>A previous session was not saved. </span><button id="btnRestore">Restore it</button><button id="btnDiscard">Discard</button></div>
       <div class="ctrl">
-        <div class="seg"><button class="switch" role="switch" aria-checked="true" id="swMic"><span class="track"></span><span>Microphone</span></button><div class="lbl">Microphone<small>You, labeled Me</small></div></div>
-        <div class="seg"><button class="switch" role="switch" aria-checked="true" id="swSys"><span class="track"></span><span>Shared audio</span></button><div class="lbl">Shared audio<small>Tab or system sound</small></div></div>
-        <div class="seg"><button class="switch" role="switch" aria-checked="true" id="swShot"><span class="track"></span><span>Screenshots</span></button><div class="lbl">Screenshots<small>Every <input class="num" type="number" id="interval" min="5" max="3600" value="60" aria-label="Screenshot interval in seconds" style="width:52px;height:22px"> <span>seconds</span></small></div></div>
+        <div class="seg" title="Your own voice through this device's microphone, labeled Me. Wear headphones so it hears only you."><button class="switch" role="switch" aria-checked="true" id="swMic"><span class="track"></span><span>Microphone</span></button><div class="lbl">Microphone</div></div>
+        <div class="seg" title="The other participants, from the screen or tab you share. Tick Share system audio in the share dialog. Voices are labeled Speaker 1, Speaker 2, ..."><button class="switch" role="switch" aria-checked="true" id="swSys"><span class="track"></span><span>Shared audio</span></button><div class="lbl">Shared audio</div></div>
+        <div class="seg" title="A picture of the shared screen at this interval; unchanged screens are skipped."><button class="switch" role="switch" aria-checked="true" id="swShot"><span class="track"></span><span>Screenshots</span></button><div class="lbl">Screenshots<small>Every <input class="num" type="number" id="interval" min="5" max="3600" value="60" aria-label="Screenshot interval in seconds" style="width:52px;height:22px"> <span>seconds</span></small></div></div>
+        <div class="go"><button class="primary" id="btnStart">Start recording</button></div>
         <div class="timer" id="timerBox"><span>&#9679;</span><span id="status">Ready.</span></div>
-        <div class="hint">Start asks you to share a screen, window or tab. Tick <b>Share system audio</b> (or <b>Share tab audio</b>) so the other participants are heard. Wear headphones so the microphone hears only you; remote voices are labeled Speaker 1, Speaker 2, ... by voice. Switches and the interval work while recording.</div>
+        <div class="hint" hidden></div>
       </div>
+      <div class="work">
       <section class="panel">
         <div class="phead"><h2>Transcript</h2>
           <div class="exportbar" id="exportbar" style="border:0;padding:0;background:none;margin-left:6px">
@@ -262,8 +285,13 @@
           <div class="search"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="search" placeholder="Search this conversation" aria-label="Search the transcript"></div>
           <button class="icon" id="btnCopy" title="Copy transcript" aria-label="Copy transcript">&#10697;</button>
         </div>
-        <div class="tv" id="tv"><div class="empty" id="empty"><h2>Make room for the moment.</h2><p>Press <b>Start recording</b>. Live words appear as people talk, each finished statement becomes a row with its speaker, and screenshots land in between.</p><p>Chrome or Edge. Nothing is uploaded unless you connect Google Drive.</p></div></div>
+        <div class="tv" id="tv"><div class="empty" id="empty"><h2>Make room for the moment.</h2><p>Press <b>Start recording</b>. The transcript appears here.</p></div></div>
       </section>
+      <div class="rail">
+        <section class="card"><h3>Speakers <small>click to rename</small></h3><div class="spk-list" id="spkList"><div class="none">No one yet.</div></div></section>
+        <section class="card grow"><h3>Screenshots <small id="shotCount"></small></h3><div class="shot-list" id="shotList"><div class="none">None yet.</div></div></section>
+      </div>
+      </div>
     </section>
 
     <section class="view" id="viewRecordings">

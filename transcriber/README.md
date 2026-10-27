@@ -46,6 +46,10 @@ How it works, all inside the browser, nothing uploaded:
   pause still comes out as separate rows. Rows are only joined into a paragraph when the same identified voice
   continues; until the model has started (a few seconds after the page opens), statements are labeled "Others" and
   stay as separate rows. Two people talking over each other cannot be separated.
+- **Speakers panel** (right side): click a name to rename it, and the whole transcript and every export use that
+  name. Giving two numbers the same name tells the app they are one person. If the app itself notices that two
+  numbered voices have become indistinguishable, it folds the later number into the earlier one.
+- **Screenshots panel**: thumbnails of every screenshot; click one to jump to it in the transcript.
 - **Screenshots** from the share every N seconds (default 60), identical frames skipped.
 - All three switches and the interval work while recording. Turning a source off pauses it; turning on a source that
   was never started prompts for the share or the microphone.
