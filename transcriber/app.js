@@ -22,8 +22,9 @@
   const on = sw => sw.getAttribute('aria-checked') === 'true';
   const setOn = (sw, v) => sw.setAttribute('aria-checked', v ? 'true' : 'false');
   const esc = s => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-  const SPK = ['#2563eb', '#c2410c', '#7c3aed', '#0e7490', '#b91c1c', '#4d7c0f', '#a16207', '#be185d'];
-  const whoColor = w => w === 'Me' ? '#16805c' : w.startsWith('Speaker ') ? SPK[(parseInt(w.slice(8)) - 1) % 8] : 'var(--muted)';
+  const SPK_HEX = ['#2b5fd9', '#c24a12', '#7a3fd1', '#0c7a8a', '#b11f3a', '#4f7a12', '#9a6a08', '#b3236f'];
+  const whoColor = w => w === 'Me' ? 'var(--me)' : w.startsWith('Speaker ') ? `var(--s${(parseInt(w.slice(8)) - 1) % 8 + 1})` : 'var(--ink-soft)';
+  const whoHex = w => w === 'Me' ? '#157a5b' : w.startsWith('Speaker ') ? SPK_HEX[(parseInt(w.slice(8)) - 1) % 8] : '#6f655d';
   document.querySelectorAll('.switch').forEach(sw => sw.addEventListener('click', () => { if (sw.disabled) return; setOn(sw, !on(sw)); if (sw === swInclude) rebuildView(); else if (S.running) liveToggle(sw).catch(e => setStatus('Could not change that: ' + e.message)); }));
   // Switches work while recording: pausing a source keeps its stream and just stops feeding it; enabling a source
   // that was never started acquires it (the browser will prompt for the share or the microphone).
@@ -59,7 +60,7 @@
       d.querySelector('img').src = e.data;
     } else {
       d.className = 'e' + (e.kind === 'err' ? ' err' : '');
-      d.innerHTML = `<div><div class="who" style="color:${e.kind === 'err' ? 'var(--primary)' : whoColor(e.who)}">${esc(e.who)}</div><div class="t">${ms(e.t)}</div></div><div class="x"></div>`;
+      d.innerHTML = `<div><div class="who" style="color:${e.kind === 'err' ? 'var(--accent)' : whoColor(e.who)}">${esc(e.who)}</div><div class="t">${ms(e.t)}</div></div><div class="x"></div>`;
       d.querySelector('.x').textContent = e.text;
     }
     return d;
@@ -418,7 +419,7 @@
     let o = `<!doctype html><html><head><meta charset="utf-8"><title>${esc(d.title)}</title><style>body{font:16px/1.65 'Segoe UI',Inter,system-ui,sans-serif;max-width:960px;margin:40px auto;padding:0 24px;color:#1d1c1a;background:#f7f5f1}h1{font-size:26px;margin:0 0 4px}.meta{color:#8a857d;font-size:13px;letter-spacing:.04em;text-transform:uppercase;margin-bottom:28px}.e{display:grid;grid-template-columns:130px 1fr;gap:12px 20px;padding:14px 0;border-top:1px solid #e9e5df}.who{font-weight:600}.t{font:12px Consolas,monospace;color:#8a857d;margin-top:3px}.x{white-space:pre-wrap}img{max-width:100%;border:1px solid #e3dfd8;border-radius:8px}figure{margin:0}figcaption{font:12px Consolas,monospace;color:#8a857d;margin-top:6px}</style></head><body><h1>${esc(d.title)}</h1><div class="meta">${esc(d.started)} &middot; ${hms(d.duration)}</div>`;
     for (const e of d.entries) o += e.kind === 'shot'
       ? `<div class="e"><div><div class="who" style="color:#8a857d">Screenshot</div><div class="t">${ms(e.t)}</div></div><figure><img loading="lazy" src="${e.data}"><figcaption>${esc(e.file)}</figcaption></figure></div>`
-      : `<div class="e"><div><div class="who" style="color:${whoColor(e.who).replace('var(--muted)', '#8a857d')}">${esc(e.who)}</div><div class="t">${ms(e.t)}</div></div><div class="x">${esc(e.text)}</div></div>`;
+      : `<div class="e"><div><div class="who" style="color:${whoHex(e.who)}">${esc(e.who)}</div><div class="t">${ms(e.t)}</div></div><div class="x">${esc(e.text)}</div></div>`;
     return new Blob([o + '</body></html>'], { type: 'text/html;charset=utf-8' });
   }
   function imgSize(dataUrl) { return new Promise(r => { const i = new Image(); i.onload = () => r([i.naturalWidth, i.naturalHeight]); i.onerror = () => r([16, 9]); i.src = dataUrl; }); }
