@@ -12,7 +12,7 @@
   const SR = 16000;
 
   const MOBILE = !(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia);   // phones and tablets: microphone only
-  const S = { running: false, active: { Others: true, Me: true }, started: null, t0: 0, segs: [], shots: [], live: { Me: '', Others: '' }, lastWho: '', lastT1: -100, pendingOthers: 0 };
+  const S = { running: false, active: { Others: true, Me: true }, started: null, t0: 0, segs: [], shots: [], live: { Me: '', Others: '' }, lastWho: '', lastT1: -100, pendingOthers: 0, spkLog: [] };
   let display = null, mic = null, worker = null, workerReady = false, shotTimer = null, clockTimer = null, video = null, lastShotHash = 0, jobs = new Map(), jobSeq = 0;
 
   const now = () => (performance.now() - S.t0) / 1000;
@@ -90,7 +90,7 @@
   function merged(withShots) {
     const v = []; let lw = '', lt = -100;
     for (const s of [...S.segs].sort((a, b) => a.t0 - b.t0)) {
-      if (v.length && v[v.length - 1].kind === 'text' && s.who === lw && s.t0 - lt < 15) v[v.length - 1].text += ' ' + s.text;
+      if (v.length && v[v.length - 1].kind === 'text' && s.who === lw && s.who !== 'Others' && s.t0 - lt < 15) v[v.length - 1].text += ' ' + s.text;
       else v.push({ kind: 'text', who: s.who, text: s.text, t: s.t0 });
       lw = s.who; lt = s.t1;
     }
@@ -151,13 +151,9 @@
           else if (m.type === 'ready') { workerReady = true; S.engine = m.modelName || ''; S.tier = m.tier; S.speed = []; if (m.downgraded) setStatus('Switched to the faster whisper model for this machine.'); else if (S.running) setStatus('Recording.'); worker._res?.(true); }
           else if (m.type === 'note') { console.warn(m.text); }
           else if (m.type === 'error') { setStatus('Speech model failed to load: ' + m.error); worker._res?.(false); }
-          else if (m.type === 'embed-ready') { spkReady = !m.error; setStatus(m.error ? 'Speaker labels unavailable: ' + m.error : S.running ? 'Recording.' : 'Ready. Models are loaded.'); worker._spkRes?.(spkReady); }
-          else if (m.type === 'embedding') onEmbedding(m);
-          else if (m.type === 'embeddings') onEmbeddings(m);
-          else if (m.type === 'progress' && m.spk) { if (m.p && m.p.status === 'progress' && m.p.file && m.p.file.endsWith('.onnx')) setStatus(`Downloading speaker model (first time only): ${Math.round(m.p.progress || 0)}%`); else if (m.p && m.p.status === 'done' && m.p.file && m.p.file.endsWith('.onnx')) setStatus('Starting speaker model (20-40 s on a laptop)…'); }
           else if (m.type === 'result') {
             const j = jobs.get(m.id); jobs.delete(m.id); S.pendingOthers = Math.max(0, S.pendingOthers - 1);
-            if (m.ms && m.sec > 1 && m.tier === 'small') {   // slower than real time on this machine? step down once
+            if (m.ms && m.sec > 1 && m.tier !== 'tiny') {   // slower than real time on this machine? step down a size (small -> base -> tiny)
               S.speed.push(m.ms / 1000 / m.sec); if (S.speed.length >= 3) { const avg = S.speed.slice(-3).reduce((x, y) => x + y, 0) / 3; if (avg > 1.0) { worker.postMessage({ type: 'downgrade' }); S.speed = []; } }
             }
             const text = (m.text || '').trim().replace(/\s+/g, ' ');
@@ -169,9 +165,10 @@
       worker._res = resolve; worker.postMessage({ type: 'load', memGB: navigator.deviceMemory || 4 });
     });
   }
-  // Whisper rewrites a segment in the background. Skipped when the queue is behind, so text is never missing.
+  // Whisper rewrites a segment in the background. Jobs queue up (the model steps down a size if it falls behind);
+  // only when the queue is very deep is a segment left with its live text, so text is never missing.
   function refine(seg, audio) {
-    if (!worker || !workerReady || S.pendingOthers >= 2 || audio.length < SR * 0.6) return;
+    if (!worker || !workerReady || S.pendingOthers >= 6 || audio.length < SR * 0.6) return;
     const id = ++jobSeq; jobs.set(id, { seg }); S.pendingOthers++;
     worker.postMessage({ type: 'transcribe', id, audio: normalize(audio) }, [audio.buffer]);
   }
@@ -182,7 +179,8 @@
   }
   function final(who, text, t0, t1) {
     const s = { who, text, t0, t1 }; S.segs.push(s); applyPending();
-    addEntry({ kind: 'text', who, text, t: t0 }, who === S.lastWho && t0 - S.lastT1 < 15, s); S.lastWho = who; S.lastT1 = t1; autosave();
+    // consecutive rows join into a paragraph only when the same identified voice continues; unlabelled rows stay separate
+    addEntry({ kind: 'text', who, text, t: t0 }, who === S.lastWho && who !== 'Others' && t0 - S.lastT1 < 15, s); S.lastWho = who; S.lastT1 = t1; autosave();
     return s;
   }
 
@@ -222,24 +220,41 @@
     return voskLoading;
   }
   // speaker labels
-  let spkReady = false, spkLoading = null; const spk = []; const embJobs = new Map(); let embSeq = 0;
+  // The voice-fingerprint model (CAM++, 29 MB) runs in its own worker so it never queues behind whisper.
+  let spkWorker = null, spkReady = false, spkLoading = null; const spk = []; const embJobs = new Map(); let embSeq = 0;
   function ensureSpeaker() {
     if (spkReady) return Promise.resolve(true);
-    if (!worker) return Promise.resolve(false);
     if (!spkLoading) spkLoading = new Promise(resolve => {
-      setStatus('Loading speaker model (first time only, ~100 MB)…');
-      const timer = setTimeout(() => { setStatus('Speaker labels unavailable: the speaker model took too long to start.'); resolve(false); }, 180000);
-      worker._spkRes = ok => { clearTimeout(timer); if (!ok) spkLoading = null; resolve(ok); };
-      worker.postMessage({ type: 'load-embed' });
+      try { spkWorker = new Worker('spk-worker.js', { type: 'module' }); } catch (e) { spkLoading = null; return resolve(false); }
+      setStatus('Loading speaker model (first time only, 30 MB)…');
+      const timer = setTimeout(() => { setStatus('Speaker labels unavailable: the speaker model took too long to start.'); spkLoading = null; resolve(false); }, 180000);
+      const done = ok => { clearTimeout(timer); spkReady = ok; if (!ok) spkLoading = null; resolve(ok); };
+      spkWorker.onmessage = ev => {
+        const m = ev.data;
+        if (m.type === 'embed-ready') { setStatus(m.error ? 'Speaker labels unavailable: ' + m.error : S.running ? 'Recording.' : 'Ready. Models are loaded.'); done(!m.error); }
+        else if (m.type === 'embedding') onEmbedding(m);
+        else if (m.type === 'embeddings') onEmbeddings(m);
+        else if (m.type === 'progress') { if (m.p.status === 'progress') setStatus(`Downloading speaker model (first time only): ${m.p.progress}%`); else if (m.p.status === 'done') setStatus('Starting speaker model…'); }
+      };
+      spkWorker.onerror = e => { setStatus('Speaker labels unavailable: ' + (e.message || e)); done(false); };
+      spkWorker.postMessage({ type: 'load-embed' });
     });
     return spkLoading;
   }
   const cosine = (x, y) => { let d = 0, nx = 0, ny = 0; for (let i = 0; i < x.length; i++) { d += x[i] * y[i]; nx += x[i] * x[i]; ny += y[i] * y[i]; } return nx && ny ? d / Math.sqrt(nx * ny) : 0; };
+  // 3D-Speaker CAM++ cosine: a 2 s window scores ~0.75 against its own speaker's centroid and under ~0.45 against
+  // another speaker's; consecutive windows of one voice score ~0.6, a change of voice ~0.1
+  const SAME_VOICE = 0.55, RUN_BREAK = 0.38;
+  // A piece joins the closest known voice when it is at least a fair match (SAME_VOICE), and also when it is short or
+  // the match is middling but not clearly foreign (NEW_VOICE): a brand-new speaker needs a clearly different voice
+  // heard for a few seconds. Up to 8 voices.
+  const NEW_VOICE = 0.42;
   function assignSpeaker(emb, seconds) {
     let best = -1, bestSim = -1;
     spk.forEach((k, i) => { const c = cosine(emb, k.c); if (c > bestSim) { bestSim = c; best = i; } });
-    const longEnough = seconds >= 1.5;
-    if (best >= 0 && (bestSim >= 0.65 || !longEnough || spk.length >= 8)) {
+    const clearlyNew = bestSim < NEW_VOICE && seconds >= 2.5 || bestSim < SAME_VOICE && seconds >= 4;
+    S.spkLog.push([+bestSim.toFixed(2), +seconds.toFixed(1), clearlyNew ? 'new' : best + 1]); if (S.spkLog.length > 300) S.spkLog.shift();
+    if (best >= 0 && (!clearlyNew || spk.length >= 8)) {
       const k = spk[best], w = 1 / (k.n + 1); for (let i = 0; i < emb.length; i++) k.c[i] = k.c[i] * (1 - w) + emb[i] * w; k.n = Math.min(20, k.n + 1); return best + 1;
     }
     spk.push({ c: emb.slice(), n: 1 }); return spk.length;
@@ -258,9 +273,15 @@
     if (!E || !j.words || !j.words.length) { refine(final(E ? 'Speaker ' + assignSpeaker(meanVec(E), j.audio.length / SR) : 'Others', j.text, j.t0, j.t1), j.audio); return; }
     // group consecutive windows into runs of one voice; a run breaks where a window no longer resembles the run so far
     const runs = [{ embs: [E[0]], sWin: 0, eWin: 0 }];
-    for (let i = 1; i < E.length; i++) { const r = runs[runs.length - 1]; if (cosine(E[i], meanVec(r.embs)) >= 0.68) { r.embs.push(E[i]); r.eWin = i; } else runs.push({ embs: [E[i]], sWin: i, eWin: i }); }
+    for (let i = 1; i < E.length; i++) { const r = runs[runs.length - 1]; if (cosine(E[i], meanVec(r.embs)) >= RUN_BREAK) { r.embs.push(E[i]); r.eWin = i; } else runs.push({ embs: [E[i]], sWin: i, eWin: i }); }
     // run boundaries in statement seconds: the middle of the first window of the new run
-    const bounds = runs.slice(1).map(r => (W[r.sWin].s + (W[r.sWin].e - W[r.sWin].s) / 2) / SR);
+    // ... then snapped to the word gap nearest that point (the longest silence between words within 0.7 s)
+    const gaps = j.words.slice(1).map((w, i) => ({ at: w.s - j.s0, len: w.s - j.words[i].e }));
+    const bounds = runs.slice(1).map(r => {
+      const b = (W[r.sWin].s + (W[r.sWin].e - W[r.sWin].s) / 2) / SR;
+      const near = gaps.filter(g => Math.abs(g.at - b) <= 0.7).sort((x, y) => y.len - x.len || Math.abs(x.at - b) - Math.abs(y.at - b));
+      return near.length ? near[0].at - 0.001 : b;
+    });
     const pieces = runs.map((r, i) => ({ from: i ? bounds[i - 1] : 0, to: i < bounds.length ? bounds[i] : j.audio.length / SR, emb: meanVec(r.embs), words: [] }));
     for (const w of j.words) { const mid = (w.s + w.e) / 2 - j.s0; const p = pieces.find(p => mid >= p.from && mid < p.to) || pieces[pieces.length - 1]; p.words.push(w); }
     const out = [];
@@ -319,10 +340,10 @@
         const t = a.text, t0 = a.t0, t1 = a.t1, n = a.n;
         if (label === 'Others' && spkReady && n >= SR * 0.8) {
           const id = ++embSeq, WIN = SR * 2, HOP = SR;
-          if (n >= SR * 3 && embJobs.size < 2) {   // look for speaker changes inside the statement
+          if (n >= SR * 3 && embJobs.size < 4) {   // look for speaker changes inside the statement
             const windows = []; for (let st = 0; st + WIN <= n; st += HOP) windows.push({ s: st, e: st + WIN }); if (windows[windows.length - 1].e < n - SR * 0.5) windows.push({ s: n - WIN, e: n });
-            embJobs.set(id, { label, text: t, t0, t1, audio, words: a.words, s0: a.s0, windows }); worker.postMessage({ type: 'embed-multi', id, audio: audio.slice(), windows });
-          } else { embJobs.set(id, { label, text: t, t0, t1, audio }); worker.postMessage({ type: 'embed', id, audio: audio.slice() }); }
+            embJobs.set(id, { label, text: t, t0, t1, audio, words: a.words, s0: a.s0, windows }); spkWorker.postMessage({ type: 'embed-multi', id, audio: audio.slice(), windows });
+          } else { embJobs.set(id, { label, text: t, t0, t1, audio }); spkWorker.postMessage({ type: 'embed', id, audio: audio.slice() }); }
         }
         else refine(final(label === 'Others' && spk.length ? 'Speaker 1' : label, t, t0, t1), audio);
         updateLive();
@@ -406,7 +427,7 @@
   async function start() {
     const wantSys = !MOBILE && on(swSys), wantMic = on(swMic), wantShot = !MOBILE && on(swShot);
     if (!wantSys && !wantMic) { setStatus('Turn on at least one audio source.'); return; }
-    S.running = true; S.started = new Date(); S.t0 = performance.now(); spk.length = 0; embJobs.clear(); S.segs = []; S.shots = []; S.live = { Me: '', Others: '' }; S.lastWho = ''; S.lastT1 = -100; S.pendingOthers = 0; lastShotHash = 0;
+    S.running = true; S.started = new Date(); S.t0 = performance.now(); spk.length = 0; embJobs.clear(); S.spkLog = []; S.segs = []; S.shots = []; S.live = { Me: '', Others: '' }; S.lastWho = ''; S.lastT1 = -100; S.pendingOthers = 0; lastShotHash = 0;
     tv.innerHTML = ''; liveBox = null; exportbar.classList.remove('show'); $('restoreBanner').classList.remove('show'); $('search').value = '';
     sessionFileId = null; clearInterval(sessionSaveTimer); sessionSaveTimer = setInterval(() => saveSession(false), 180000);
     S.active = { Others: wantSys, Me: wantMic }; btnStart.disabled = true;
