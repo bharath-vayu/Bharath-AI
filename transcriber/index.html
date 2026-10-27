@@ -42,13 +42,15 @@
     color-scheme: dark;
   }
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
   html, body { height: 100%; margin: 0; }
   body { background: var(--paper); color: var(--ink); font: 15px/1.5 var(--sans); display: flex; flex-direction: column; -webkit-font-smoothing: antialiased; }
+  body > * { width: 100%; max-width: 1180px; margin-left: auto !important; margin-right: auto !important; }
   body::before { content: ""; position: fixed; inset: 0; pointer-events: none; z-index: -1;
     background: radial-gradient(1200px 500px at 15% -10%, var(--accent-bg), transparent 60%), radial-gradient(900px 400px at 100% 0%, var(--paper-2), transparent 55%); }
   a { color: inherit; }
-  .top { display: flex; align-items: center; gap: 14px; padding: 18px max(16px, env(safe-area-inset-right, 0px)) 0 max(16px, env(safe-area-inset-left, 0px)); }
-  @media (min-width: 700px) { .top { padding-left: 28px; padding-right: 28px; } }
+  .top { display: flex; align-items: center; gap: 14px; padding: 18px 0 0; }
+  @media (min-width: 700px) { .top { padding-left: 0; padding-right: 0; } }
   .top .logo { width: 34px; height: 34px; flex: none; border-radius: 9px; }
   .top h1 { font: 500 27px/1 var(--display); letter-spacing: -.01em; margin: 0; }
   .top .hub { color: var(--ink-soft); font-size: 13px; text-decoration: none; margin-left: 4px; border-bottom: 1px solid transparent; }
@@ -69,8 +71,9 @@
   button.dark { background: var(--dark); border-color: var(--dark); color: var(--on-dark); font-weight: 600; height: 38px; padding: 0 26px; }
   button.dark:hover { opacity: .9; }
   button.icon { width: 34px; padding: 0; display: inline-grid; place-items: center; color: var(--ink-soft); font-size: 15px; }
-  .card { margin: 18px 16px 0; background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px 20px; display: flex; flex-wrap: wrap; gap: 14px 28px; align-items: center; box-shadow: var(--shadow); }
-  @media (min-width: 700px) { .card, .panel, .status, .banner { margin-left: 28px; margin-right: 28px; } }
+  .card { margin: 18px 0 0; background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px 20px; display: flex; flex-wrap: wrap; gap: 14px 28px; align-items: center; box-shadow: var(--shadow); }
+  @media (max-width: 1240px) { body > * { max-width: calc(100% - 56px); } }
+  @media (max-width: 700px) { body > * { max-width: calc(100% - 24px); } }
   .switch { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; user-select: none; background: none; border: 0; padding: 0; height: 28px; border-radius: 6px; font-weight: 500; }
   .switch .track { width: 40px; height: 22px; border-radius: 11px; background: var(--line-strong); position: relative; transition: background .15s; flex: none; }
   .switch .track::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: transform .15s; box-shadow: 0 1px 2px rgba(0,0,0,.25); }
@@ -81,7 +84,7 @@
   input.num:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
   .hint { width: 100%; color: var(--ink-soft); font-size: 13px; margin-top: -2px; line-height: 1.55; }
   .hint b { color: var(--ink); font-weight: 600; }
-  .panel { flex: 1; min-height: 0; margin: 14px 16px 0; background: var(--card); border: 1px solid var(--line); border-radius: 14px; display: flex; flex-direction: column; overflow: hidden; box-shadow: var(--shadow); }
+  .panel { flex: 1; min-height: 0; margin: 14px 0 0; background: var(--card); border: 1px solid var(--line); border-radius: 14px; display: flex; flex-direction: column; overflow: hidden; box-shadow: var(--shadow); }
   .exportbar { display: none; align-items: center; gap: 8px; padding: 12px 18px; border-bottom: 1px solid var(--line); flex-wrap: wrap; background: var(--paper-2); }
   .exportbar.show { display: flex; }
   .exportbar .lbl { color: var(--ink-soft); font: 500 11px var(--mono); letter-spacing: .12em; text-transform: uppercase; margin-right: 6px; }
@@ -104,8 +107,8 @@
   .empty { color: var(--ink-soft); text-align: center; padding: 16vh 20px 0; }
   .empty h2 { font: 500 30px/1.15 var(--display); color: var(--ink); margin: 0 0 10px; text-wrap: balance; }
   .empty p { margin: 6px auto; max-width: 52ch; }
-  .status { padding: 8px 16px 14px; color: var(--ink-soft); font: 13px var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .banner { margin: 12px 16px 0; padding: 10px 16px; border: 1px solid transparent; background: var(--accent-bg); border-radius: 12px; display: none; align-items: center; gap: 10px; font-size: 14px; }
+  .status { padding: 8px 4px 14px; color: var(--ink-soft); font: 13px var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .banner { margin: 12px 0 0; padding: 10px 16px; border: 1px solid transparent; background: var(--accent-bg); border-radius: 12px; display: none; align-items: center; gap: 10px; font-size: 14px; }
   .banner.show { display: flex; }
   .banner button { height: 30px; }
   dialog { border: 1px solid var(--line); border-radius: 14px; padding: 22px 24px; width: min(520px, 92vw); color: var(--ink); background: var(--card); box-shadow: var(--shadow); }
@@ -127,73 +130,187 @@
 </script>
 </head>
 <body>
-<header class="top">
-  <img class="logo" src="icon.svg" alt="">
-  <h1>Transcriber</h1>
-  <a class="hub" href="../">All tools</a>
-  <span class="pill" id="pill"><span class="dot"></span><span id="pillText">Idle</span></span>
-  <span class="spacer"></span>
-  <button class="icon" id="btnTheme" title="Light / dark" aria-label="Toggle light or dark theme">&#9681;</button>
-  <button class="icon" id="btnSettings" title="Google Drive settings" aria-label="Settings">&#9881;</button>
-  <button class="primary" id="btnStart">Start</button>
-</header>
+<style>
+  /* Studio layout: sidebar + main column. All original component styles above still apply. */
+  body { display: block; overflow: hidden; }
+  body > * { max-width: none !important; }
+  .studio { display: grid; grid-template-columns: 248px 1fr; height: 100%; }
+  aside { background: var(--paper-2); border-right: 1px solid var(--line); padding: 22px 18px; display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+  .brand { display: flex; align-items: center; gap: 10px; }
+  .brand img { width: 32px; height: 32px; border-radius: 8px; }
+  .brand .name { font: 500 22px/1 var(--display); letter-spacing: -.01em; }
+  .brand .tag { white-space: nowrap; font: 500 9px var(--mono); letter-spacing: .12em; color: var(--ink-soft); background: var(--card); border: 1px solid var(--line); border-radius: 4px; padding: 2px 6px; margin-left: 2px; }
+  .brand a { text-decoration: none; color: inherit; display: flex; align-items: center; gap: 10px; }
+  .newrec { width: 100%; height: 44px; border-radius: 10px; background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; font-size: 15px; box-shadow: 0 6px 18px -8px var(--accent); }
+  .newrec:hover { background: var(--accent-dn); }
+  .navlbl { font: 500 11px var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-faint); margin: 6px 0 -8px; }
+  nav { display: flex; flex-direction: column; gap: 4px; }
+  nav button { display: flex; align-items: center; gap: 12px; width: 100%; height: 42px; border-radius: 10px; border: 1px solid transparent; background: transparent; color: var(--ink-soft); font-weight: 500; padding: 0 12px; justify-content: flex-start; }
+  nav button:hover { background: var(--card); }
+  nav button.on { background: var(--accent-bg); color: var(--accent); }
+  nav button .n { margin-left: auto; font: 500 11px var(--mono); background: var(--card); border: 1px solid var(--line); border-radius: 6px; padding: 2px 7px; color: var(--ink-soft); }
+  nav button svg { width: 18px; height: 18px; flex: none; }
+  .side-foot { margin-top: auto; border-top: 1px solid var(--line); padding-top: 14px; font-size: 13px; color: var(--ink-soft); display: flex; flex-direction: column; gap: 10px; }
+  .side-foot b { color: var(--ink); font-weight: 600; }
+  .drive-state { display: flex; align-items: center; gap: 8px; }
+  .drive-state .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ink-faint); flex: none; }
+  .drive-state.on .dot { background: var(--me); }
+  main { min-width: 0; height: 100%; overflow: hidden; display: flex; flex-direction: column; padding: 22px 28px 0; }
+  .view { display: none; flex: 1; min-height: 0; flex-direction: column; }
+  .view.on { display: flex; }
+  .mhead { display: flex; align-items: flex-end; gap: 16px; flex-wrap: wrap; margin-bottom: 16px; }
+  .mhead .eyebrow { font: 500 11px var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-faint); }
+  .mhead h1 { font: 500 34px/1.05 var(--display); letter-spacing: -.015em; margin: 4px 0 0; }
+  .mhead h1 em { font-style: italic; color: var(--accent); }
+  .mhead .sub { color: var(--ink-soft); margin: 6px 0 0; }
+  .mhead .right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+  .ctrl { display: flex; align-items: center; gap: 0; background: var(--card); border: 1px solid var(--line); border-radius: 12px; margin-bottom: 14px; box-shadow: var(--shadow); flex-wrap: wrap; }
+  .ctrl .seg { display: flex; align-items: center; gap: 12px; padding: 12px 18px; border-right: 1px solid var(--line); min-width: 0; }
+  .ctrl .seg:last-child { border-right: 0; }
+  .ctrl .seg .lbl { display: flex; flex-direction: column; gap: 2px; }
+  .ctrl .seg .lbl small { color: var(--ink-faint); font-size: 12px; }
+  .ctrl .seg .switch { gap: 8px; }
+  .ctrl .seg .switch span:last-child { display: none; }
+  .ctrl .timer { margin-left: auto; padding: 12px 18px; display: flex; align-items: center; gap: 12px; color: var(--ink-soft); font: 500 13px var(--mono); }
+  .ctrl .hint { width: 100%; padding: 0 18px 12px; margin: 0; }
+  .panel { margin: 0; flex: 1; min-height: 0; }
+  .panel .phead { display: flex; align-items: center; gap: 12px; padding: 10px 14px 10px 18px; border-bottom: 1px solid var(--line); }
+  .panel .phead h2 { font: 500 17px var(--display); margin: 0; }
+  .panel .phead .search { margin-left: auto; display: flex; align-items: center; gap: 8px; border: 1px solid var(--line); border-radius: 999px; padding: 0 12px; height: 32px; background: var(--paper); min-width: 0; }
+  .panel .phead .search input { border: 0; background: transparent; font: inherit; color: var(--ink); outline: 0; width: 200px; max-width: 40vw; }
+  .panel .phead .search input::placeholder { color: var(--ink-faint); }
+  .e.hit { background: var(--accent-bg); border-radius: 8px; padding-left: 10px; padding-right: 10px; }
+  .e.dim { display: none; }
+  .status { padding: 8px 0 12px; }
+  /* recordings */
+  .list { display: flex; flex-direction: column; gap: 10px; overflow: auto; padding: 4px 2px 20px; }
+  .rec { display: grid; grid-template-columns: 1fr auto; gap: 6px 14px; align-items: center; background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px 18px; cursor: pointer; box-shadow: var(--shadow); }
+  .rec:hover { border-color: var(--line-strong); }
+  .rec .title { font-weight: 600; }
+  .rec .meta { grid-column: 1; font: 12px var(--mono); color: var(--ink-faint); }
+  .rec .acts { grid-row: 1 / span 2; display: flex; gap: 6px; }
+  .rec .acts button { height: 30px; padding: 0 12px; font-size: 13px; }
+  .note-box { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; color: var(--ink-soft); max-width: 70ch; }
+  .note-box h3 { margin: 0 0 6px; font: 500 20px var(--display); color: var(--ink); }
+  .note-box p { margin: 6px 0; }
+  .note-box code { font-family: var(--mono); font-size: 13px; background: var(--paper-2); padding: 1px 6px; border-radius: 4px; }
+  .settings { display: flex; flex-direction: column; gap: 14px; max-width: 640px; }
+  .settings .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .settings input.text { flex: 1; min-width: 240px; height: 36px; border: 1px solid var(--line-strong); border-radius: 8px; padding: 0 12px; font: inherit; background: var(--card); color: var(--ink); }
+  .settings label { font-weight: 600; }
+  .help { max-width: 72ch; color: var(--ink-soft); overflow: auto; }
+  .help h3 { font: 500 20px var(--display); color: var(--ink); margin: 18px 0 6px; }
+  .help p, .help li { margin: 6px 0; }
+  @media (max-width: 900px) {
+    body { overflow: auto; }
+    .studio { grid-template-columns: 1fr; height: auto; }
+    aside { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 10px; padding: 12px 16px; border-right: 0; border-bottom: 1px solid var(--line); }
+    .brand { flex: 1 1 100%; }
+    .newrec { width: auto; height: 38px; padding: 0 16px; }
+    .navlbl, .side-foot { display: none; }
+    nav { flex-direction: row; flex-wrap: wrap; }
+    nav button { width: auto; height: 36px; padding: 0 12px; gap: 8px; }
+    main { height: auto; overflow: visible; padding: 16px; }
+    .panel { min-height: 60vh; }
+    .ctrl .timer { margin-left: 0; }
+    .mhead h1 { font-size: 28px; }
+  }
+</style>
+<div class="studio">
+  <aside>
+    <div class="brand"><a href="../" title="All tools"><img src="icon.svg" alt=""><span class="name">Transcriber</span></a><span class="tag">BHARATH AI</span></div>
+    <button class="newrec" id="btnNew">+ New recording</button>
+    <div class="navlbl">Workspace</div>
+    <nav>
+      <button class="on" data-view="recorder" id="navRecorder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M5 7a9 9 0 0 1 0 10M19 7a9 9 0 0 0 0 10"/></svg>Recorder</button>
+      <button data-view="recordings" id="navRecordings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h6l2 2h10v10H3z"/></svg>My recordings<span class="n" id="recCount">0</span></button>
+      <button data-view="settings" id="navSettings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>Settings</button>
+      <button data-view="help" id="navHelp"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3M12 17h0"/></svg>Help</button>
+    </nav>
+    <div class="side-foot">
+      <div><b>Your words. Your device.</b><br>Nothing leaves this machine unless you connect Google Drive.</div>
+      <div class="drive-state" id="driveState"><span class="dot"></span><span id="driveStateText">Google Drive not connected</span></div>
+      <button class="icon" id="btnTheme" title="Light / dark" aria-label="Toggle light or dark theme" style="align-self:flex-start">&#9681;</button>
+    </div>
+  </aside>
 
-<div class="banner" id="restoreBanner">
-  <span>A previous session was not exported. </span>
-  <button id="btnRestore">Restore it</button>
-  <button id="btnDiscard">Discard</button>
+  <main>
+    <section class="view on" id="viewRecorder">
+      <div class="mhead">
+        <div><div class="eyebrow">Live transcript</div><h1>Every word, <em>as it is said.</em></h1></div>
+        <div class="right">
+          <span class="pill" id="pill"><span class="dot"></span><span id="pillText">Idle</span></span>
+          <button class="icon" id="btnSettings" title="Google Drive settings" aria-label="Settings" hidden>&#9881;</button>
+          <button class="primary" id="btnStart">Start recording</button>
+        </div>
+      </div>
+      <div class="banner" id="restoreBanner"><span>A previous session was not saved. </span><button id="btnRestore">Restore it</button><button id="btnDiscard">Discard</button></div>
+      <div class="ctrl">
+        <div class="seg"><button class="switch" role="switch" aria-checked="true" id="swMic"><span class="track"></span><span>Microphone</span></button><div class="lbl">Microphone<small>You, labeled Me</small></div></div>
+        <div class="seg"><button class="switch" role="switch" aria-checked="true" id="swSys"><span class="track"></span><span>Shared audio</span></button><div class="lbl">Shared audio<small>Tab or system sound</small></div></div>
+        <div class="seg"><button class="switch" role="switch" aria-checked="true" id="swShot"><span class="track"></span><span>Screenshots</span></button><div class="lbl">Screenshots<small>Every <input class="num" type="number" id="interval" min="5" max="3600" value="60" aria-label="Screenshot interval in seconds" style="width:52px;height:22px"> <span>seconds</span></small></div></div>
+        <div class="timer" id="timerBox"><span>&#9679;</span><span id="status">Ready.</span></div>
+        <div class="hint">Start asks you to share a screen, window or tab. Tick <b>Share system audio</b> (or <b>Share tab audio</b>) so the other participants are heard. Wear headphones so the microphone hears only you; remote voices are labeled Speaker 1, Speaker 2, ... by voice. Switches and the interval work while recording.</div>
+      </div>
+      <section class="panel">
+        <div class="phead"><h2>Transcript</h2>
+          <div class="exportbar" id="exportbar" style="border:0;padding:0;background:none;margin-left:6px">
+            <span class="lbl">Save as</span><button data-fmt="txt">Text</button><button data-fmt="html">HTML</button><button data-fmt="pdf">PDF</button><button data-fmt="docx">Word</button>
+            <button class="switch" role="switch" aria-checked="true" id="swInclude"><span class="track"></span><span>Screenshots</span></button>
+            <button class="drive" id="btnDrive" style="margin-left:0">Save to Google Drive</button>
+          </div>
+          <div class="search"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="search" placeholder="Search this conversation" aria-label="Search the transcript"></div>
+          <button class="icon" id="btnCopy" title="Copy transcript" aria-label="Copy transcript">&#10697;</button>
+        </div>
+        <div class="tv" id="tv"><div class="empty" id="empty"><h2>Make room for the moment.</h2><p>Press <b>Start recording</b>. Live words appear as people talk, each finished statement becomes a row with its speaker, and screenshots land in between.</p><p>Chrome or Edge. Nothing is uploaded unless you connect Google Drive.</p></div></div>
+      </section>
+    </section>
+
+    <section class="view" id="viewRecordings">
+      <div class="mhead"><div><div class="eyebrow">Library</div><h1>My <em>recordings.</em></h1><p class="sub" id="recSub">Connect Google Drive in Settings to keep every session here.</p></div><div class="right"><button id="btnRefreshRecs">Refresh</button></div></div>
+      <div class="list" id="recList"></div>
+    </section>
+
+    <section class="view" id="viewSettings">
+      <div class="mhead"><div><div class="eyebrow">Settings</div><h1>Google <em>Drive.</em></h1><p class="sub">One-time connection. Sessions are then saved to a Transcriber folder in your Drive and listed under My recordings.</p></div></div>
+      <div class="settings">
+        <div class="note-box"><h3>Step 1: Client ID</h3><p>Create a free OAuth client in Google Cloud (steps in the README) and paste its Client ID here. It stays in this browser.</p>
+          <div class="row"><input class="text" id="clientId" placeholder="xxxxxxxx.apps.googleusercontent.com" spellcheck="false"><button class="dark" id="dlgSave" style="height:36px">Save</button></div></div>
+        <div class="note-box"><h3>Step 2: Connect</h3><p>Sign in once with the Google account whose Drive should hold the sessions.</p>
+          <div class="row"><button class="primary" id="btnConnect" style="height:36px">Connect Google Drive</button><button id="btnDisconnect">Disconnect</button><span id="connectState" style="color:var(--ink-soft)"></span></div></div>
+        <div class="note-box"><h3>Appearance</h3><div class="row"><button id="btnTheme2">Toggle light / dark</button></div></div>
+      </div>
+    </section>
+
+    <section class="view" id="viewHelp">
+      <div class="mhead"><div><div class="eyebrow">Help</div><h1>How it <em>works.</em></h1></div></div>
+      <div class="help">
+        <h3>Recording</h3>
+        <p>Press Start recording. In the share dialog choose <b>Entire Screen</b> and keep <b>Share system audio</b> on so the other participants are heard (a window share carries no audio on Windows). Allow the microphone when asked.</p>
+        <p>Grey words are live and provisional. When a speaker pauses, the statement becomes a row with a speaker label; the newest row never changes while you read it, and the cleaner rewrite lands when the next statement starts.</p>
+        <h3>Speakers</h3>
+        <p>Remote voices are labeled Speaker 1, Speaker 2, ... by voice, and a statement is split where the voice changes. Two people speaking at the exact same instant cannot be separated. When you are physically in the room with the others, turn the microphone off so you are not heard twice.</p>
+        <h3>Saving</h3>
+        <p>Stop shows Text, HTML, PDF and Word. With Google Drive connected the session is also saved automatically and appears under My recordings on every device where you sign in.</p>
+        <h3>Phones</h3>
+        <p>Phones cannot capture the screen or system audio, so the page switches to microphone only. Put the phone where it hears everyone.</p>
+        <h3>Machines</h3>
+        <p>The speech models adapt to the machine: the larger model on a real graphics card, the lighter one elsewhere; the status line says which is running. First use downloads them once.</p>
+      </div>
+    </section>
+  </main>
 </div>
 
-<section class="card">
-  <button class="switch" role="switch" aria-checked="true" id="swSys"><span class="track"></span><span>System audio (others)</span></button>
-  <button class="switch" role="switch" aria-checked="true" id="swMic"><span class="track"></span><span>Microphone (me)</span></button>
-  <button class="switch" role="switch" aria-checked="true" id="swShot"><span class="track"></span><span>Screenshot every</span></button>
-  <input class="num" type="number" id="interval" min="5" max="3600" value="60" aria-label="Screenshot interval in seconds"> <span style="color:var(--muted)">seconds</span>
-  <div class="hint">Start asks you to share a screen, window or tab. Tick <b>Share system audio</b> (or <b>Share tab audio</b>) in that dialog so the other participants are heard. Screenshots come from the same share. Wear headphones so the microphone hears only you; remote voices are labeled Speaker 1, Speaker 2, ... by voice. All three switches and the interval can be changed while recording.</div>
-</section>
-
-<section class="panel">
-  <div class="exportbar" id="exportbar">
-    <span class="lbl">Save as</span>
-    <button data-fmt="txt">Text</button>
-    <button data-fmt="html">HTML</button>
-    <button data-fmt="pdf">PDF</button>
-    <button data-fmt="docx">Word</button>
-    <button class="switch" role="switch" aria-checked="true" id="swInclude"><span class="track"></span><span>Include screenshots</span></button>
-    <button class="drive" id="btnDrive">Save to Google Drive</button>
-  </div>
-  <div class="tv" id="tv">
-    <div class="empty" id="empty"><h2>Every word, as it is said.</h2><p>Press <b>Start</b>. Live words appear as people talk, each finished statement becomes a row with its speaker, and screenshots land in between.</p><p>Chrome or Edge. Nothing is uploaded unless you press Save to Google Drive.</p></div>
-  </div>
-</section>
-<div class="status" id="status">Ready.</div>
-
-<dialog id="dlgSettings">
-  <h2>Google Drive</h2>
-  <p>Paste the OAuth Client ID of your Google Cloud project. Transcripts are saved to a <code>Transcriber</code> folder in the Drive of whoever is signed in. See the README for the one-time setup.</p>
-  <input class="text" id="clientId" placeholder="xxxxxxxx.apps.googleusercontent.com" spellcheck="false">
-  <div class="row"><button id="dlgCancel">Cancel</button><button class="dark" id="dlgSave" style="height:34px">Save</button></div>
-</dialog>
-
-<dialog id="dlgDrive">
-  <h2>Save to Google Drive</h2>
-  <p>Format</p>
-  <div style="display:flex;gap:8px;flex-wrap:wrap" id="driveFmts">
-    <button data-fmt="html" class="dark" style="height:32px">HTML</button><button data-fmt="pdf">PDF</button><button data-fmt="docx">Word</button><button data-fmt="txt">Text</button>
-  </div>
-  <div class="row"><button id="dlgDriveCancel">Cancel</button></div>
-</dialog>
+<dialog id="dlgSettings" hidden><h2>Google Drive</h2><p>Settings moved to the Settings page.</p><div class="row"><button id="dlgCancel">Close</button></div></dialog>
+<dialog id="dlgDrive"><h2>Save to Google Drive</h2><p>Format</p><div style="display:flex;gap:8px;flex-wrap:wrap" id="driveFmts"><button data-fmt="html" class="dark" style="height:32px">HTML</button><button data-fmt="pdf">PDF</button><button data-fmt="docx">Word</button><button data-fmt="txt">Text</button></div><div class="row"><button id="dlgDriveCancel">Cancel</button></div></dialog>
 
 <script src="https://cdn.jsdelivr.net/npm/vosk-browser@0.0.8/dist/vosk.js" crossorigin="anonymous"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.js" crossorigin="anonymous"></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script>
-  document.getElementById('btnTheme').addEventListener('click', () => {
-    const root = document.documentElement, sys = matchMedia('(prefers-color-scheme: dark)').matches;
-    const cur = root.getAttribute('data-theme') || (sys ? 'dark' : 'light'), next = cur === 'dark' ? 'light' : 'dark';
-    root.setAttribute('data-theme', next); try { localStorage.setItem('transcriber.theme', next); } catch (e) {}
-  });
+  const toggleTheme = () => { const root = document.documentElement, sys = matchMedia('(prefers-color-scheme: dark)').matches; const cur = root.getAttribute('data-theme') || (sys ? 'dark' : 'light'), next = cur === 'dark' ? 'light' : 'dark'; root.setAttribute('data-theme', next); try { localStorage.setItem('transcriber.theme', next); } catch (e) {} };
+  document.getElementById('btnTheme').addEventListener('click', toggleTheme); document.getElementById('btnTheme2').addEventListener('click', toggleTheme);
 </script>
 <script src="app.js"></script>
 </body>
